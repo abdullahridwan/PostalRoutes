@@ -7,7 +7,7 @@ export const CHARACTERS = [
 ];
 export const PORTRAITS = [
   "postboy", "professor", "granny", "fisher", "florist", "riverboatcaptain",
-  "beachcomber", "shopkeeper", "childactor", "nurse",
+  "beachcomber", "childactor", "nurse", // (shopkeeper portrait is a "?" placeholder upstream)
 ];
 
 export class Boot extends Phaser.Scene {
