@@ -12,7 +12,7 @@ import {
   BOULDERS, BUILDINGS, H, PLAYER_START, VILLAGERS, W, WILD_MONSTERS, type VillagerDef,
 } from "../world/layout";
 import { TILESETS, WATER_FRAMES } from "../world/tiles";
-import type { UI, Msg } from "./UI";
+import type { MapInfo, Msg, UI } from "./UI";
 
 const MS_PER_GAME_MINUTE = 330;
 const DYE_PRICE = 40;
@@ -95,14 +95,15 @@ export class World extends Phaser.Scene {
     this.spawnEverything();
 
     this.cursors = this.input.keyboard!.createCursorKeys();
-    this.keys = this.input.keyboard!.addKeys("W,A,S,D,E,SPACE,ENTER,SHIFT,TAB,Q,M,R") as Record<string, Phaser.Input.Keyboard.Key>;
+    this.keys = this.input.keyboard!.addKeys("W,A,S,D,E,SPACE,ENTER,SHIFT,TAB,Q,M,N,R") as Record<string, Phaser.Input.Keyboard.Key>;
     this.input.keyboard!.addCapture("TAB,SPACE,UP,DOWN,LEFT,RIGHT");
     this.keys.E.on("down", () => this.onAction());
     this.keys.SPACE.on("down", () => this.onAction());
     this.keys.ENTER.on("down", () => this.onAction());
     this.keys.TAB.on("down", () => this.mode === "play" && this.ui.toggleBag(this.state));
     this.keys.Q.on("down", () => this.mode === "play" && this.ui.toggleBag(this.state));
-    this.keys.M.on("down", () => this.ui.toast(toggleMute() ? "Sound off" : "Sound on"));
+    this.keys.M.on("down", () => this.mode === "play" && this.ui.toggleMap(this.mapInfo()));
+    this.keys.N.on("down", () => this.ui.toast(toggleMute() ? "Sound off" : "Sound on"));
 
     // water shimmer + sparkles
     this.time.addEvent({ delay: 280, loop: true, callback: () => this.animateWater() });
@@ -135,11 +136,36 @@ export class World extends Phaser.Scene {
       for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (grid[y][x]) layer.putTileAt(grid[y][x], x, y);
       return layer;
     };
+    const layers: Phaser.Tilemaps.TilemapLayer[] = [];
     this.data2.below.forEach((g, i) => {
       const l = put(g, `below${i}`, i);
       if (i === 0) this.groundLayer = l;
+      layers.push(l);
     });
-    this.data2.above.forEach((g, i) => put(g, `above${i}`, 1000 + i));
+    this.data2.above.forEach((g, i) => layers.push(put(g, `above${i}`, 1000 + i)));
+
+    // bake the whole town into one texture for the map screen
+    if (this.textures.exists("worldmap")) this.textures.remove("worldmap");
+    const rt = this.add.renderTexture(0, 0, W * TILE, H * TILE).setOrigin(0).setVisible(false);
+    for (const l of layers) rt.draw(l);
+    rt.saveTexture("worldmap");
+  }
+
+  /** Everything the map screen needs, in tile coordinates. */
+  mapInfo(): MapInfo {
+    const s = this.state;
+    const targets = this.deliveryTargets().map((t) => ({ x: t.x / TILE, y: t.y / TILE }));
+    return {
+      player: { x: this.player.tx + 0.5, y: this.player.ty + 0.5 },
+      targets,
+      buildings: BUILDINGS.map((b) => ({ id: b.id, label: b.label, x: b.x + b.door + 0.5, y: b.y })),
+      regions: [
+        { label: "Cliffside", x: 12, y: 14.6, locked: !s.bouldersSmashed },
+        { label: "Flower Meadow", x: 56.5, y: 9.6, locked: false },
+        { label: "Lighthouse Isle", x: 53, y: 46.6, locked: !s.canSwim },
+        { label: "Seabreeze Bay", x: 36, y: 43.5, locked: false },
+      ],
+    };
   }
 
   spawnEverything() {
@@ -222,7 +248,7 @@ export class World extends Phaser.Scene {
         { text: "You're the new courier! Your trusty penguin, Pip, waddles along behind you." },
         { name: "Pip", text: "Pweep! ♪" },
         { text: "Head to the Post Office (the wooden building with the anchor, just east) and talk to Postmaster Gull for your mailbag." },
-        { text: "Arrows / WASD to walk · E or Space to talk & deliver · TAB for your mailbag · M to mute." },
+        { text: "Arrows / WASD to walk · E or Space to talk & deliver · TAB for your mailbag · M for the map · N to mute." },
       ]);
     } else {
       this.ui.toast(`Day ${this.state.day}`);

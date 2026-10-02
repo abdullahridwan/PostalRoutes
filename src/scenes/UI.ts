@@ -22,6 +22,19 @@ const NAVY = 0x1d2b3a;
 const txt = (s: Phaser.Scene, x: number, y: number, t: string, size: number, color = INK, extra: Phaser.Types.GameObjects.Text.TextStyle = {}) =>
   s.add.text(x, y, t, { fontFamily: FONT, fontSize: `${size}px`, color, resolution: 2, ...extra });
 
+export type MapInfo = {
+  player: { x: number; y: number };
+  targets: { x: number; y: number }[];
+  buildings: { id: string; label: string; x: number; y: number }[];
+  regions: { label: string; x: number; y: number; locked: boolean }[];
+};
+
+// Short names for the map on small screens.
+const SHORT_LABELS: Record<string, string> = {
+  post: "Post Office", home: "Home", granny: "Marigold", mart: "Mart", clinic: "Clinic",
+  shelly: "Shelly", rosa: "Rosa", tobi: "Tobi", finn: "Finn", captain: "Captain",
+};
+
 type FriendInfo = { id: string; name: string; sprite: string; ability: string; locked: boolean };
 
 export class UI extends Phaser.Scene {
@@ -46,6 +59,9 @@ export class UI extends Phaser.Scene {
 
   bagOpen = false;
   bagPanel!: Phaser.GameObjects.Container;
+
+  mapOpen = false;
+  mapPanel!: Phaser.GameObjects.Container;
 
   hud!: Phaser.GameObjects.Container;
   hudDay!: Phaser.GameObjects.Text;
@@ -76,6 +92,7 @@ export class UI extends Phaser.Scene {
     this.buildDialog();
     this.letterCard = this.add.container(0, 0).setDepth(300).setVisible(false);
     this.bagPanel = this.add.container(0, 0).setDepth(250).setVisible(false);
+    this.mapPanel = this.add.container(0, 0).setDepth(260).setVisible(false);
     this.prompt = txt(this, 0, 0, "", 16, "#fff4dc", { backgroundColor: "#1d2b3acc", padding: { x: 12, y: 6 } }).setOrigin(0.5, 1).setDepth(100).setVisible(false);
 
     const kb = this.input.keyboard!;
@@ -90,6 +107,7 @@ export class UI extends Phaser.Scene {
     this.touch = new TouchControls(this);
     this.touch.onA = () => this.world().onAction();
     this.touch.onB = () => { const w = this.world(); if (w.mode === "play") this.toggleBag(w.state); };
+    this.touch.onMap = () => { const w = this.world(); if (w.mode === "play") this.toggleMap(w.mapInfo()); };
     this.input.addPointer(2);
     const coarse = typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
     if (coarse || new URLSearchParams(location.search).has("touch")) this.touch.enabled = true;
@@ -367,12 +385,13 @@ export class UI extends Phaser.Scene {
   }
 
   isBusy() {
-    return !!this.current || this.letterOpen || this.bagOpen || !!this.title;
+    return !!this.current || this.letterOpen || this.bagOpen || this.mapOpen || !!this.title;
   }
 
   advance() {
     if (this.letterOpen) return this.closeLetter();
     if (this.bagOpen) return this.toggleBag();
+    if (this.mapOpen) return this.toggleMap();
     const m = this.current;
     if (!m) return;
     if (this.typing < m.text.length) return this.finishTyping();
@@ -433,6 +452,68 @@ export class UI extends Phaser.Scene {
     const done = this.letterDone;
     this.letterDone = null;
     done?.();
+  }
+
+  // ── Town map ────────────────────────────────────────────────
+  toggleMap(info?: MapInfo) {
+    if (this.mapOpen || !info) {
+      this.mapOpen = false;
+      this.tweens.killTweensOf(this.mapPanel.list);
+      this.mapPanel.setVisible(false).removeAll(true);
+      sfx.blip();
+      return;
+    }
+    if (this.current || this.letterOpen || this.bagOpen) return;
+    const { width, height } = this.scale;
+    const frame = this.textures.getFrame("worldmap");
+    const mw = frame.width, mh = frame.height;
+    const compact = width < 560;
+    const s = Math.min((width - (compact ? 24 : 80)) / mw, (height - (compact ? 150 : 150)) / mh, 1.3);
+    const dw = mw * s, dh = mh * s;
+    const ox = (width - dw) / 2, oy = (height - dh) / 2 + 10;
+    const at = (tx: number, ty: number) => ({ x: ox + tx * 16 * s, y: oy + ty * 16 * s });
+    const p = this.mapPanel;
+    p.removeAll(true);
+
+    const g = this.add.graphics();
+    g.fillStyle(0x0b1530, 0.75).fillRect(0, 0, width, height);
+    g.fillStyle(0x000000, 0.3).fillRoundedRect(ox - 10 + 5, oy - 10 + 7, dw + 20, dh + 20, 14);
+    g.fillStyle(PAPER_EDGE, 1).fillRoundedRect(ox - 10, oy - 10, dw + 20, dh + 20, 14);
+    p.add(g);
+    p.add(this.add.image(ox, oy, "worldmap").setOrigin(0).setScale(s));
+    p.add(txt(this, width / 2, oy - 22, "Seabreeze Bay", compact ? 22 : 28, "#ffe8a8", { stroke: "#1d2b3a", strokeThickness: 6 }).setOrigin(0.5, 1));
+
+    const tag = (x: number, y: number, label: string, size: number, color: string, bg: string) =>
+      p.add(txt(this, x, y, label, size, color, { backgroundColor: bg, padding: { x: 5, y: 2 } }).setOrigin(0.5, 1));
+
+    for (const r of info.regions) {
+      if (compact && !r.locked) continue; // small screens: only flag places you can't reach yet
+      const pt = at(r.x, r.y);
+      tag(pt.x, pt.y, r.locked ? `${r.label} (locked)` : r.label, compact ? 12 : 15, r.locked ? "#c9d2dc" : "#ffe8a8", "#1d2b3acc");
+    }
+    for (const b of info.buildings) {
+      const pt = at(b.x, b.y);
+      tag(pt.x, pt.y, compact ? SHORT_LABELS[b.id] ?? b.label : b.label, compact ? 11 : 14, INK, "#fff4dcdd");
+    }
+    for (const t of info.targets) {
+      const pt = at(t.x, t.y);
+      const env = this.add.image(pt.x, pt.y - 4, "envelope").setScale(compact ? 2 : 2.5);
+      p.add(env);
+      this.tweens.add({ targets: env, y: env.y - 5, yoyo: true, repeat: -1, duration: 420, ease: "Sine.inOut" });
+    }
+    const me = at(info.player.x, info.player.y);
+    const ring = this.add.circle(me.x, me.y, compact ? 9 : 12, 0xffe066, 0.35).setStrokeStyle(3, 0xe74c3c);
+    const dot = this.add.circle(me.x, me.y, compact ? 4 : 5, 0xe74c3c).setStrokeStyle(2, 0xffffff);
+    p.add([ring, dot]);
+    this.tweens.add({ targets: ring, scale: 1.6, alpha: 0, repeat: -1, duration: 900 });
+    tag(me.x, me.y - (compact ? 10 : 14), "You", compact ? 12 : 14, "#ffffff", "#e74c3c");
+
+    const legend = info.targets.length ? `✉ = mail to deliver (${info.targets.length})` : "No mail waiting right now";
+    p.add(txt(this, width / 2, oy + dh + 18, `${legend}   ·   ${compact ? "tap" : "M / tap"} to close`, compact ? 13 : 16, "#fff4dc").setOrigin(0.5, 0));
+    p.setVisible(true).setAlpha(0);
+    this.tweens.add({ targets: p, alpha: 1, duration: 180 });
+    this.mapOpen = true;
+    sfx.open();
   }
 
   // ── Mailbag ─────────────────────────────────────────────────
@@ -508,7 +589,7 @@ export class UI extends Phaser.Scene {
       c.add(b);
       return b;
     });
-    const credit = txt(this, cx, height - 22, "Art: the Tuxemon project & contributors (CC BY-SA) · Arrows/WASD · E · TAB · SHIFT", 15, "#dfe8f0").setOrigin(0.5, 1);
+    const credit = txt(this, cx, height - 22, "Art: the Tuxemon project & contributors (CC BY-SA) · Arrows/WASD · E · TAB · M map", 15, "#dfe8f0").setOrigin(0.5, 1);
     c.add(credit);
     this.paintTitle();
   }

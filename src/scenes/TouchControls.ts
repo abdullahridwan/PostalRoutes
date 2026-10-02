@@ -6,7 +6,7 @@ const DEAD_ZONE = 12;
 const FONT = "Pixelify Sans, monospace";
 
 type Button = {
-  id: "a" | "b" | "run";
+  id: "a" | "b" | "run" | "map";
   r: number;
   x: number;
   y: number;
@@ -24,6 +24,7 @@ export class TouchControls {
   showRun = false;
   onA: () => void = () => {};
   onB: () => void = () => {};
+  onMap: () => void = () => {};
 
   private root: Phaser.GameObjects.Container;
   private pad: Phaser.GameObjects.Graphics;
@@ -42,17 +43,18 @@ export class TouchControls {
       this.root.add([g, t]);
       return { id, r, x: 0, y: 0, label, g, t, pointer: -1 };
     };
-    this.buttons = [mk("a", 40, "A", 26), mk("b", 30, "Bag", 15), mk("run", 28, "Run", 14)];
+    this.buttons = [mk("a", 40, "A", 26), mk("b", 30, "Bag", 15), mk("run", 28, "Run", 14), mk("map", 26, "Map", 14)];
   }
 
   layout(width: number, height: number) {
     const m = 22;
     this.padX = m + PAD_R;
     this.padY = height - m - PAD_R;
-    const [a, b, run] = this.buttons;
+    const [a, b, run, map] = this.buttons;
     a.x = width - m - a.r - 6; a.y = height - m - a.r - 34;
     b.x = a.x - a.r - b.r - 18; b.y = height - m - b.r;
     run.x = a.x - 6; run.y = a.y - a.r - run.r - 18;
+    map.x = b.x - 4; map.y = b.y - b.r - map.r - 20;
     this.redraw();
   }
 
@@ -82,6 +84,7 @@ export class TouchControls {
         b.pointer = p.id;
         if (b.id === "a") this.onA();
         if (b.id === "b") this.onB();
+        if (b.id === "map") this.onMap();
         if (b.id === "run") this.run = true;
         this.redraw();
         return true;

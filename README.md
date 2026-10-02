@@ -25,9 +25,10 @@ Open http://localhost:5173.
 | E / Space / Enter | Talk, deliver, choose |
 | TAB / Q | Open the mailbag |
 | SHIFT | Zoom (once Bzz the bee joins) |
-| M | Mute |
+| M | Town map |
+| N | Mute |
 
-**On phones and tablets** an on-screen D-pad appears automatically: **A** to talk and deliver, **Bag** for the mailbag, **Run** once Bzz joins, and tap anywhere to advance dialogue. Add `?touch` to the URL to force it on a desktop.
+**On phones and tablets** an on-screen D-pad appears automatically: **A** to talk and deliver, **Bag** for the mailbag, **Map** for the town map, **Run** once Bzz joins, and tap anywhere to advance dialogue. Add `?touch` to the URL to force it on a desktop.
 
 ## The loop
 - **Morning:** talk to Postmaster Gull at the Post Office to get today's mail.
