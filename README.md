@@ -1,4 +1,8 @@
-# ✉ Postal Route: Seabreeze Bay
+<p align="center">
+  <img src="docs/banner.png" alt="Postal Route: a cozy mail-delivery game set in Seabreeze Bay" width="100%" />
+</p>
+
+# Postal Route: Seabreeze Bay
 
 A cozy, browser-based mail-delivery game. You're the new courier in a sleepy seaside town:
 pick up the mailbag each morning, deliver letters, befriend monsters, and slowly

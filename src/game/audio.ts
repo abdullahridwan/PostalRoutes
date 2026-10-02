@@ -47,6 +47,14 @@ export const sfx = {
   morning: () => [392, 523, 659, 784].forEach((f, i) => tone(f, i * 0.12, 0.35, "sine", 0.2)),
 };
 
+/** Tap the master mix as a MediaStream (used for recording trailers). */
+export function audioStream(): MediaStream {
+  const c = ac();
+  const dest = c.createMediaStreamDestination();
+  master!.connect(dest);
+  return dest.stream;
+}
+
 export function toggleMute() {
   muted = !muted;
   return muted;
