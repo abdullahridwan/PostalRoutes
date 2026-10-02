@@ -3,6 +3,8 @@ import { sfx } from "../game/audio";
 import type { Letter } from "../game/letters";
 import { clockText, letterById, type GameState } from "../game/state";
 import { BUILDINGS, VILLAGERS } from "../world/layout";
+import { TouchControls } from "./TouchControls";
+import type { World } from "./World";
 
 export type Msg = {
   name?: string;
@@ -31,6 +33,7 @@ export class UI extends Phaser.Scene {
   dialogText!: Phaser.GameObjects.Text;
   dialogPortrait!: Phaser.GameObjects.Image;
   dialogMore!: Phaser.GameObjects.Text;
+  measure!: Phaser.GameObjects.Text;
   choiceTexts: Phaser.GameObjects.Text[] = [];
   choiceIndex = 0;
   current: Msg | null = null;
@@ -64,6 +67,8 @@ export class UI extends Phaser.Scene {
   rain?: Phaser.GameObjects.Particles.ParticleEmitter;
   petals?: Phaser.GameObjects.Particles.ParticleEmitter;
 
+  touch!: TouchControls;
+
   constructor() { super("UI"); }
 
   create() {
@@ -81,22 +86,57 @@ export class UI extends Phaser.Scene {
     kb.on("keydown-ENTER", () => this.titleSelect());
     kb.on("keydown-SPACE", () => this.titleSelect());
     kb.on("keydown-E", () => this.titleSelect());
-    this.input.on("pointerdown", () => {
+    // touch: on-screen pad for phones (auto-detected, or force with ?touch)
+    this.touch = new TouchControls(this);
+    this.touch.onA = () => this.world().onAction();
+    this.touch.onB = () => { const w = this.world(); if (w.mode === "play") this.toggleBag(w.state); };
+    this.input.addPointer(2);
+    const coarse = typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
+    if (coarse || new URLSearchParams(location.search).has("touch")) this.touch.enabled = true;
+
+    this.input.on("pointerdown", (p: Phaser.Input.Pointer) => {
+      if (p.wasTouch && !this.touch.enabled) { this.touch.enabled = true; this.layout(); }
       if (this.title) return;
-      if (this.isBusy()) this.advance();
+      if (this.isBusy()) {
+        // with choices on screen, only a tap on a choice should pick one
+        if (this.current?.choices && this.typing >= this.current.text.length) return;
+        this.advance();
+        return;
+      }
+      this.touch.down(p);
     });
+    this.input.on("pointermove", (p: Phaser.Input.Pointer) => this.touch.move(p));
+    this.input.on("pointerup", (p: Phaser.Input.Pointer) => this.touch.up(p));
+    this.input.on("pointerupoutside", (p: Phaser.Input.Pointer) => this.touch.up(p));
 
     this.scale.on("resize", this.layout, this);
     this.events.once("shutdown", () => this.scale.off("resize", this.layout, this));
     this.layout();
   }
 
+  world() {
+    return this.scene.get("World") as World;
+  }
+
+  update() {
+    if (!this.touch.enabled) return;
+    const w = this.world();
+    this.touch.setVisible(w.mode === "play" && !this.isBusy());
+  }
+
   // ── Layout ──────────────────────────────────────────────────
   layout() {
     const { width, height } = this.scale;
     this.hud.setPosition(14, 14);
-    this.prompt.setPosition(width / 2, height - 18);
-    this.friendsRow.setPosition(14, height - 14);
+    if (this.touch.enabled) {
+      // keep the bottom clear for the pad: friends tuck under the HUD, prompt floats above
+      this.prompt.setPosition(width / 2, height - this.touch.reservedHeight - 8);
+      this.friendsRow.setPosition(14, 14 + 76 + 10 + 46).setScale(0.8);
+    } else {
+      this.prompt.setPosition(width / 2, height - 18);
+      this.friendsRow.setPosition(14, height - 14).setScale(1);
+    }
+    this.touch.layout(width, height);
     this.drawDialogFrame();
     if (this.title) this.drawTitle();
   }
@@ -130,6 +170,7 @@ export class UI extends Phaser.Scene {
     this.hudSnacks.setText(`${s.snacks}`);
     this.hudBag.setText(`${s.bag.length}`);
 
+    this.touch.showRun = friends.some((f) => f.id === "bzz");
     const key = friends.map((f) => f.id + f.locked).join();
     if (key !== this.friendsKey) {
       this.friendsKey = key;
@@ -195,34 +236,40 @@ export class UI extends Phaser.Scene {
     this.dialogName = txt(this, 0, 0, "", 16, "#fff4dc", { backgroundColor: "#b0503a", padding: { x: 10, y: 4 } });
     this.dialogText = txt(this, 0, 0, "", 18, INK, { lineSpacing: 6 });
     this.dialogMore = txt(this, 0, 0, "▼", 16, "#b0503a").setOrigin(1, 1);
+    this.measure = txt(this, 0, 0, "", 18, INK, { lineSpacing: 6 }).setVisible(false);
     this.tweens.add({ targets: this.dialogMore, alpha: 0.2, yoyo: true, repeat: -1, duration: 400 });
     this.dialog.add([this.dialogBg, this.dialogPortrait, this.dialogName, this.dialogText, this.dialogMore]);
   }
 
-  dialogRect() {
-    const { width, height } = this.scale;
-    const w = Math.min(760, width - 32);
-    const h = 132;
-    return { x: (width - w) / 2, y: height - h - 16, w, h };
-  }
-
+  /** Lays out the dialogue box; it grows to fit the message and goes compact on phones. */
   drawDialogFrame() {
-    const r = this.dialogRect();
+    const { width, height } = this.scale;
+    const compact = width < 560;
+    const w = Math.min(760, width - (compact ? 20 : 32));
+    const hasPortrait = !!this.current?.portrait;
+    const pSize = compact ? 64 : 108;
+    const textOffset = hasPortrait ? 12 + pSize + 14 : 22;
+    const wrap = w - textOffset - 24;
+    const fontSize = compact ? 16 : 18;
+    this.dialogText.setFontSize(fontSize).setWordWrapWidth(wrap);
+    this.measure.setFontSize(fontSize).setWordWrapWidth(wrap).setText(this.current?.text ?? "");
+    const h = Math.max(compact ? 100 : 132, hasPortrait ? pSize + 24 : 0, this.measure.height + 46);
+    const x = (width - w) / 2, y = height - h - (compact ? 10 : 16);
+
     const g = this.dialogBg;
     g.clear();
-    g.fillStyle(0x000000, 0.25).fillRoundedRect(r.x + 4, r.y + 6, r.w, r.h, 14);
-    g.fillStyle(PAPER, 1).fillRoundedRect(r.x, r.y, r.w, r.h, 14);
-    g.lineStyle(4, PAPER_EDGE).strokeRoundedRect(r.x, r.y, r.w, r.h, 14);
-    const hasPortrait = !!this.current?.portrait;
+    g.fillStyle(0x000000, 0.25).fillRoundedRect(x + 4, y + 6, w, h, 14);
+    g.fillStyle(PAPER, 1).fillRoundedRect(x, y, w, h, 14);
+    g.lineStyle(4, PAPER_EDGE).strokeRoundedRect(x, y, w, h, 14);
     if (hasPortrait) {
-      g.fillStyle(0xf3dfb5, 1).fillRoundedRect(r.x + 12, r.y + 12, 108, 108, 10);
-      this.dialogPortrait.setPosition(r.x + 66, r.y + 66);
+      g.fillStyle(0xf3dfb5, 1).fillRoundedRect(x + 12, y + 12, pSize, pSize, 10);
+      this.dialogPortrait.setScale(compact ? 1 : 1.6).setPosition(x + 12 + pSize / 2, y + 12 + pSize / 2);
     }
-    const tx = r.x + (hasPortrait ? 136 : 22);
-    this.dialogName.setPosition(tx, r.y - 14);
-    this.dialogText.setPosition(tx, r.y + 22).setWordWrapWidth(r.x + r.w - tx - 24);
-    this.dialogMore.setPosition(r.x + r.w - 14, r.y + r.h - 8);
-    this.choiceTexts.forEach((c, i) => c.setPosition(r.x + r.w - 22, r.y - 14 - (this.choiceTexts.length - i) * 34));
+    const tx = x + textOffset;
+    this.dialogName.setPosition(tx, y - 14);
+    this.dialogText.setPosition(tx, y + 22);
+    this.dialogMore.setPosition(x + w - 14, y + h - 8);
+    this.choiceTexts.forEach((c, i) => c.setPosition(x + w - 22, y - 14 - (this.choiceTexts.length - i) * 34));
   }
 
   say(msgs: Msg[], onDone?: () => void) {
@@ -254,7 +301,7 @@ export class UI extends Phaser.Scene {
     this.dialog.setVisible(true);
     this.dialogName.setVisible(!!m.name).setText(m.name ?? "");
     if (m.portrait && this.textures.exists(`portrait-${m.portrait}`)) {
-      this.dialogPortrait.setTexture(`portrait-${m.portrait}`).setVisible(true).setScale(1.6).setCrop(64, 0, 64, 64);
+      this.dialogPortrait.setTexture(`portrait-${m.portrait}`).setVisible(true).setCrop(64, 0, 64, 64);
       // texture is 128 wide; the art sits in the right half
       this.dialogPortrait.setOrigin(0.75, 0.5);
     } else {

@@ -268,6 +268,7 @@ export class World extends Phaser.Scene {
     else if (c.right.isDown || k.D.isDown) dir = "right";
     else if (c.up.isDown || k.W.isDown) dir = "up";
     else if (c.down.isDown || k.S.isDown) dir = "down";
+    else dir = this.ui.touch.dir;
     if (!dir) {
       this.player.idle();
       for (const f of this.followers) if (!f.w.moving) f.w.idle();
@@ -287,7 +288,7 @@ export class World extends Phaser.Scene {
       return;
     }
     const swimming = this.data2.water[ny][nx];
-    const zoom = this.state.friends.includes("bzz") && (k.SHIFT.isDown) && !swimming;
+    const zoom = this.state.friends.includes("bzz") && (k.SHIFT.isDown || this.ui.touch.run) && !swimming;
     const ms = swimming ? SWIM_MS : zoom ? ZOOM_MS : WALK_MS;
     this.player.setTexture(swimming ? "swimmer" : this.walkSprite());
 
