@@ -13,23 +13,14 @@ export type Msg = {
   choices?: { label: string; cb: () => void }[];
 };
 
-// Inter for everything you read; the pixel font is kept for the logo and big moments.
-const FONT = "Inter, system-ui, sans-serif";
-const PIXEL = "Pixelify Sans, monospace";
-const RES = Math.max(2, Math.ceil(window.devicePixelRatio || 1));
+const FONT = "Pixelify Sans, monospace";
 const INK = "#3b2a1a";
 const PAPER = 0xfff4dc;
 const PAPER_EDGE = 0x8a5a3c;
 const NAVY = 0x1d2b3a;
 
 const txt = (s: Phaser.Scene, x: number, y: number, t: string, size: number, color = INK, extra: Phaser.Types.GameObjects.Text.TextStyle = {}) =>
-  smooth(s.add.text(x, y, t, { fontFamily: FONT, fontSize: `${size}px`, fontStyle: "500", color, resolution: RES, ...extra }));
-
-/** Crisp, smooth text: the game uses nearest-neighbour for pixel art, which makes Inter jaggy. */
-function smooth(t: Phaser.GameObjects.Text) {
-  t.texture.setFilter(Phaser.Textures.FilterMode.LINEAR);
-  return t;
-}
+  s.add.text(x, y, t, { fontFamily: FONT, fontSize: `${size}px`, color, resolution: 2, ...extra });
 
 type FriendInfo = { id: string; name: string; sprite: string; ability: string; locked: boolean };
 
@@ -85,7 +76,7 @@ export class UI extends Phaser.Scene {
     this.buildDialog();
     this.letterCard = this.add.container(0, 0).setDepth(300).setVisible(false);
     this.bagPanel = this.add.container(0, 0).setDepth(250).setVisible(false);
-    this.prompt = txt(this, 0, 0, "", 16, "#fff4dc", { backgroundColor: "#1d2b3add", padding: { x: 12, y: 7 }, fontStyle: "600" }).setOrigin(0.5, 1).setDepth(100).setVisible(false);
+    this.prompt = txt(this, 0, 0, "", 14, "#fff4dc", { backgroundColor: "#1d2b3acc", padding: { x: 10, y: 5 } }).setOrigin(0.5, 1).setDepth(100).setVisible(false);
 
     const kb = this.input.keyboard!;
     kb.on("keydown-UP", () => this.moveChoice(-1));
@@ -140,7 +131,7 @@ export class UI extends Phaser.Scene {
     if (this.touch.enabled) {
       // keep the bottom clear for the pad: friends tuck under the HUD, prompt floats above
       this.prompt.setPosition(width / 2, height - this.touch.reservedHeight - 8);
-      this.friendsRow.setPosition(14, 14 + 80 + 10 + 50).setScale(0.85);
+      this.friendsRow.setPosition(14, 14 + 76 + 10 + 46).setScale(0.8);
     } else {
       this.prompt.setPosition(width / 2, height - 18);
       this.friendsRow.setPosition(14, height - 14).setScale(1);
@@ -154,16 +145,16 @@ export class UI extends Phaser.Scene {
   buildHud() {
     this.hud = this.add.container(0, 0).setDepth(100).setVisible(false);
     const g = this.add.graphics();
-    g.fillStyle(PAPER, 0.96).fillRoundedRect(0, 0, 232, 80, 12);
-    g.lineStyle(3, PAPER_EDGE).strokeRoundedRect(0, 0, 232, 80, 12);
-    this.hudDay = txt(this, 14, 10, "", 17, INK, { fontStyle: "700" });
-    this.hudClock = txt(this, 218, 10, "", 17, "#b0503a", { fontStyle: "700" }).setOrigin(1, 0);
-    const coin = this.add.image(22, 54, "coin").setScale(2);
-    this.hudCoins = txt(this, 36, 44, "", 17, INK, { fontStyle: "600" });
-    const snack = this.add.image(98, 54, "snack").setScale(2);
-    this.hudSnacks = txt(this, 112, 44, "", 17, INK, { fontStyle: "600" });
-    const env = this.add.image(166, 54, "envelope").setScale(2);
-    this.hudBag = txt(this, 182, 44, "", 17, INK, { fontStyle: "600" });
+    g.fillStyle(PAPER, 0.95).fillRoundedRect(0, 0, 196, 76, 10);
+    g.lineStyle(3, PAPER_EDGE).strokeRoundedRect(0, 0, 196, 76, 10);
+    this.hudDay = txt(this, 12, 8, "", 16);
+    this.hudClock = txt(this, 184, 8, "", 16, "#b0503a").setOrigin(1, 0);
+    const coin = this.add.image(18, 47, "coin").setScale(2);
+    this.hudCoins = txt(this, 30, 38, "", 15);
+    const snack = this.add.image(84, 47, "snack").setScale(2);
+    this.hudSnacks = txt(this, 96, 38, "", 15);
+    const env = this.add.image(140, 47, "envelope").setScale(2);
+    this.hudBag = txt(this, 155, 38, "", 15);
     this.hud.add([g, this.hudDay, this.hudClock, coin, this.hudCoins, snack, this.hudSnacks, env, this.hudBag]);
     this.friendsRow = this.add.container(0, 0).setDepth(100).setVisible(false);
   }
@@ -185,12 +176,12 @@ export class UI extends Phaser.Scene {
       this.friendsKey = key;
       this.friendsRow.removeAll(true);
       friends.forEach((f, i) => {
-        const x = i * 126;
+        const x = i * 112;
         const g = this.add.graphics();
-        g.fillStyle(NAVY, 0.85).fillRoundedRect(x, -50, 118, 50, 10);
+        g.fillStyle(NAVY, 0.8).fillRoundedRect(x, -46, 104, 46, 10);
         const spr = this.add.sprite(x + 22, -6, f.sprite, 1).setOrigin(0.5, 1).setScale(1.5);
-        const n = txt(this, x + 42, -45, f.name, 15, "#fff4dc", { fontStyle: "700" });
-        const a = txt(this, x + 42, -25, f.locked ? "Swim: ?" : f.ability, 14, f.locked ? "#9aabbc" : "#ffe066", { fontStyle: "600" });
+        const n = txt(this, x + 40, -42, f.name, 14, "#fff4dc");
+        const a = txt(this, x + 40, -24, f.locked ? "Swim: ?" : f.ability, 12, f.locked ? "#8899aa" : "#ffe066");
         this.friendsRow.add([g, spr, n, a]);
       });
     }
@@ -232,7 +223,7 @@ export class UI extends Phaser.Scene {
 
   toast(text: string) {
     const { width } = this.scale;
-    const t = txt(this, width / 2, 24, text, 18, "#fff4dc", { backgroundColor: "#1d2b3aee", padding: { x: 16, y: 10 }, fontStyle: "600" })
+    const t = txt(this, width / 2, 24, text, 18, "#fff4dc", { backgroundColor: "#1d2b3add", padding: { x: 14, y: 8 } })
       .setOrigin(0.5, 0).setDepth(400).setAlpha(0);
     this.tweens.add({ targets: t, alpha: 1, y: 30, duration: 250, hold: 1800, yoyo: true, onComplete: () => t.destroy() });
   }
@@ -242,10 +233,10 @@ export class UI extends Phaser.Scene {
     this.dialog = this.add.container(0, 0).setDepth(200).setVisible(false);
     this.dialogBg = this.add.graphics();
     this.dialogPortrait = this.add.image(0, 0, "portrait-postboy").setVisible(false);
-    this.dialogName = txt(this, 0, 0, "", 16, "#fff4dc", { backgroundColor: "#b0503a", padding: { x: 12, y: 5 }, fontStyle: "700" });
-    this.dialogText = txt(this, 0, 0, "", 20, INK, { lineSpacing: 7 });
+    this.dialogName = txt(this, 0, 0, "", 16, "#fff4dc", { backgroundColor: "#b0503a", padding: { x: 10, y: 4 } });
+    this.dialogText = txt(this, 0, 0, "", 18, INK, { lineSpacing: 6 });
     this.dialogMore = txt(this, 0, 0, "▼", 16, "#b0503a").setOrigin(1, 1);
-    this.measure = txt(this, 0, 0, "", 20, INK, { lineSpacing: 7 }).setVisible(false);
+    this.measure = txt(this, 0, 0, "", 18, INK, { lineSpacing: 6 }).setVisible(false);
     this.tweens.add({ targets: this.dialogMore, alpha: 0.2, yoyo: true, repeat: -1, duration: 400 });
     this.dialog.add([this.dialogBg, this.dialogPortrait, this.dialogName, this.dialogText, this.dialogMore]);
   }
@@ -259,7 +250,7 @@ export class UI extends Phaser.Scene {
     const pSize = compact ? 64 : 108;
     const textOffset = hasPortrait ? 12 + pSize + 14 : 22;
     const wrap = w - textOffset - 24;
-    const fontSize = compact ? 18 : 20;
+    const fontSize = compact ? 16 : 18;
     this.dialogText.setFontSize(fontSize).setWordWrapWidth(wrap);
     this.measure.setFontSize(fontSize).setWordWrapWidth(wrap).setText(this.current?.text ?? "");
     const h = Math.max(compact ? 100 : 132, hasPortrait ? pSize + 24 : 0, this.measure.height + 46);
@@ -275,10 +266,10 @@ export class UI extends Phaser.Scene {
       this.dialogPortrait.setScale(compact ? 1 : 1.6).setPosition(x + 12 + pSize / 2, y + 12 + pSize / 2);
     }
     const tx = x + textOffset;
-    this.dialogName.setPosition(tx, y - 16);
+    this.dialogName.setPosition(tx, y - 14);
     this.dialogText.setPosition(tx, y + 22);
     this.dialogMore.setPosition(x + w - 14, y + h - 8);
-    this.choiceTexts.forEach((c, i) => c.setPosition(x + w - 22, y - 18 - (this.choiceTexts.length - i) * 42));
+    this.choiceTexts.forEach((c, i) => c.setPosition(x + w - 22, y - 14 - (this.choiceTexts.length - i) * 34));
   }
 
   say(msgs: Msg[], onDone?: () => void) {
@@ -341,7 +332,7 @@ export class UI extends Phaser.Scene {
     if (m.choices && this.choiceTexts.length === 0) {
       this.choiceIndex = 0;
       this.choiceTexts = m.choices.map((c, i) => {
-        const t = txt(this, 0, 0, c.label, 18, INK, { backgroundColor: "#fff4dc", padding: { x: 14, y: 8 }, fontStyle: "600" })
+        const t = txt(this, 0, 0, c.label, 17, INK, { backgroundColor: "#fff4dc", padding: { x: 12, y: 6 } })
           .setOrigin(1, 0).setInteractive({ useHandCursor: true });
         t.on("pointerover", () => { this.choiceIndex = i; this.paintChoices(); });
         t.on("pointerdown", (_p: unknown, _x: unknown, _y: unknown, e: Phaser.Types.Input.EventData) => { e.stopPropagation(); this.choiceIndex = i; this.advance(); });
@@ -402,8 +393,8 @@ export class UI extends Phaser.Scene {
     const c = this.letterCard;
     c.removeAll(true);
     const w = Math.min(460, width - 40);
-    const body = txt(this, 0, 0, l.body, 19, INK, { wordWrap: { width: w - 56 }, lineSpacing: 7 });
-    const h = Math.max(240, body.height + 176);
+    const body = txt(this, 0, 0, l.body, 17, INK, { wordWrap: { width: w - 56 }, lineSpacing: 6 });
+    const h = Math.max(240, body.height + 150);
     const g = this.add.graphics();
     g.fillStyle(0x000000, 0.45).fillRect(-width, -height, width * 3, height * 3);
     g.fillStyle(0x000000, 0.25).fillRect(-w / 2 + 6, -h / 2 + 8, w, h);
@@ -420,11 +411,11 @@ export class UI extends Phaser.Scene {
     g.fillStyle(0xf3dfb5, 1).fillRect(w / 2 - 66, -h / 2 + 18, 44, 52);
     g.lineStyle(2, 0xb0503a).strokeRect(w / 2 - 66, -h / 2 + 18, 44, 52);
     const icon = this.add.image(w / 2 - 44, -h / 2 + 44, l.parcel ? "parcel" : "heart").setScale(3);
-    const title = txt(this, -w / 2 + 28, -h / 2 + 22, l.title, 23, "#b0503a", { wordWrap: { width: w - 120 }, fontStyle: "700" });
-    const meta = txt(this, -w / 2 + 28, title.y + title.height + 6, `To: ${toName}   ·   From: ${l.from}`, 15, "#8a6a4a", { wordWrap: { width: w - 120 } });
+    const title = txt(this, -w / 2 + 28, -h / 2 + 22, l.title, 21, "#b0503a", { wordWrap: { width: w - 120 } });
+    const meta = txt(this, -w / 2 + 28, title.y + title.height + 6, `To: ${toName}   ·   From: ${l.from}`, 13, "#8a6a4a", { wordWrap: { width: w - 120 } });
     body.setPosition(-w / 2 + 28, meta.y + meta.height + 18);
-    const hint = txt(this, w / 2 - 20, h / 2 - 16, "E / tap ▶", 15, "#b0503a", { fontStyle: "600" }).setOrigin(1, 1);
-    const stampTag = txt(this, -w / 2 + 28, h / 2 - 16, "✉ DELIVERED", 15, "#3a7bd5", { fontStyle: "700" }).setOrigin(0, 1).setRotation(-0.05);
+    const hint = txt(this, w / 2 - 20, h / 2 - 16, "E / click ▶", 14, "#b0503a").setOrigin(1, 1);
+    const stampTag = txt(this, -w / 2 + 28, h / 2 - 16, "✉ DELIVERED", 14, "#3a7bd5").setOrigin(0, 1).setRotation(-0.05);
     c.add([g, icon, title, meta, body, hint, stampTag]);
     c.setPosition(width / 2, height / 2 - 20).setVisible(true).setScale(0.6).setAlpha(0);
     this.tweens.add({ targets: c, scale: 1, alpha: 1, duration: 220, ease: "Back.out" });
@@ -458,26 +449,26 @@ export class UI extends Phaser.Scene {
     p.removeAll(true);
     const rows = s.bag.map((id) => letterById(s, id)!).filter(Boolean);
     const w = Math.min(520, width - 40);
-    const h = 130 + Math.max(1, rows.length) * 56;
+    const h = 120 + Math.max(1, rows.length) * 46;
     const g = this.add.graphics();
     g.fillStyle(0x000000, 0.4).fillRect(-width, -height, width * 3, height * 3);
     g.fillStyle(0x8a5a3c, 1).fillRoundedRect(-w / 2, -h / 2, w, h, 16);
     g.fillStyle(0xc8925e, 1).fillRoundedRect(-w / 2 + 8, -h / 2 + 8, w - 16, h - 16, 12);
     p.add(g);
-    p.add(txt(this, 0, -h / 2 + 22, "✉  Mailbag", 26, "#fff4dc", { fontStyle: "700" }).setOrigin(0.5, 0));
+    p.add(txt(this, 0, -h / 2 + 22, "✉  Mailbag", 24, "#fff4dc").setOrigin(0.5, 0));
     if (!rows.length) {
-      p.add(txt(this, 0, -h / 2 + 76, s.pickedUp ? "Empty! Nice work, courier." : "Empty. Visit Postmaster Gull at the Post Office.", 18, "#fff4dc", { wordWrap: { width: w - 60 }, align: "center" }).setOrigin(0.5, 0));
+      p.add(txt(this, 0, -h / 2 + 76, s.pickedUp ? "Empty! Nice work, courier." : "Empty. Visit Postmaster Gull at the Post Office.", 16, "#fff4dc", { wordWrap: { width: w - 60 }, align: "center" }).setOrigin(0.5, 0));
     }
     rows.forEach((l, i) => {
-      const y = -h / 2 + 76 + i * 56;
+      const y = -h / 2 + 70 + i * 46;
       const v = VILLAGERS.find((v) => v.id === l.to);
       const b = BUILDINGS.find((b) => b.owner === l.to);
-      g.fillStyle(PAPER, 1).fillRoundedRect(-w / 2 + 22, y, w - 44, 48, 8);
-      p.add(this.add.image(-w / 2 + 44, y + 24, l.parcel ? "parcel" : "envelope").setScale(2));
-      p.add(txt(this, -w / 2 + 66, y + 4, `To ${v?.name ?? l.to}`, 17, INK, { fontStyle: "700" }));
-      p.add(txt(this, -w / 2 + 66, y + 26, `${b?.label ?? ""}  ·  "${l.title}"`, 14, "#8a6a4a", { fixedWidth: w - 110 }));
+      g.fillStyle(PAPER, 1).fillRoundedRect(-w / 2 + 22, y, w - 44, 38, 6);
+      p.add(this.add.image(-w / 2 + 44, y + 19, l.parcel ? "parcel" : "envelope").setScale(2));
+      p.add(txt(this, -w / 2 + 66, y + 4, `To ${v?.name ?? l.to}`, 16));
+      p.add(txt(this, -w / 2 + 66, y + 21, `${b?.label ?? ""}  ·  "${l.title}"`, 12, "#8a6a4a"));
     });
-    p.add(txt(this, 0, h / 2 - 30, "TAB / E to close", 15, "#fff4dc", { fontStyle: "600" }).setOrigin(0.5, 0));
+    p.add(txt(this, 0, h / 2 - 30, "TAB / E to close", 14, "#fff4dc").setOrigin(0.5, 0));
     p.setPosition(width / 2, height / 2).setVisible(true);
     this.bagOpen = true;
     sfx.open();
@@ -501,23 +492,23 @@ export class UI extends Phaser.Scene {
     g.fillStyle(0x0b1530, 0.35).fillRect(0, 0, width, height);
     c.add(g);
     const cx = width / 2, cy = height * 0.36;
-    const sub = txt(this, cx, cy - 64, "a cozy mail-delivery game", 18, "#fff4dc", { fontStyle: "600" }).setOrigin(0.5);
-    const t1 = txt(this, cx, cy, "Postal Route", Math.min(84, width / 8), "#ffe8a8", { fontFamily: PIXEL, fontStyle: "600", stroke: "#7a3a1a", strokeThickness: 10, shadow: { offsetX: 0, offsetY: 6, color: "#00000088", blur: 0, fill: true } }).setOrigin(0.5);
-    const t2 = txt(this, cx, cy + 58, "✉  Seabreeze Bay  ✉", 28, "#fff4dc", { fontFamily: PIXEL, fontStyle: "400", stroke: "#1d2b3a", strokeThickness: 6 }).setOrigin(0.5);
+    const sub = txt(this, cx, cy - 64, "~ a cozy mail-delivery game ~", 18, "#fff4dc").setOrigin(0.5);
+    const t1 = txt(this, cx, cy, "Postal Route", Math.min(84, width / 8), "#ffe8a8", { stroke: "#7a3a1a", strokeThickness: 10, shadow: { offsetX: 0, offsetY: 6, color: "#00000088", blur: 0, fill: true } }).setOrigin(0.5);
+    const t2 = txt(this, cx, cy + 58, "✉  Seabreeze Bay  ✉", 28, "#fff4dc", { stroke: "#1d2b3a", strokeThickness: 6 }).setOrigin(0.5);
     this.tweens.add({ targets: t1, y: cy - 6, yoyo: true, repeat: -1, duration: 1600, ease: "Sine.inOut" });
     const pip = this.add.sprite(cx + t1.width / 2 + 44, cy + 34, "penguin", 1).setScale(4).setOrigin(0.5, 1);
     this.tweens.add({ targets: pip, angle: { from: -6, to: 6 }, yoyo: true, repeat: -1, duration: 500 });
     c.add([sub, t1, t2, pip]);
     const labels: string[] = this.registry.get("titleLabels");
     this.titleChoices = labels.map((l, i) => {
-      const b = txt(this, cx, cy + 140 + i * 56, l, 22, INK, { backgroundColor: "#fff4dc", padding: { x: 24, y: 12 }, fontStyle: "700" })
+      const b = txt(this, cx, cy + 140 + i * 52, l, 24, INK, { backgroundColor: "#fff4dc", padding: { x: 22, y: 10 } })
         .setOrigin(0.5).setInteractive({ useHandCursor: true });
       b.on("pointerover", () => { this.titleIndex = i; this.paintTitle(); });
       b.on("pointerdown", () => { this.titleIndex = i; this.titleSelect(); });
       c.add(b);
       return b;
     });
-    const credit = txt(this, cx, height - 22, "Art: the Tuxemon project & contributors (CC BY-SA) · Arrows/WASD · E · TAB · SHIFT", 14, "#dfe8f0").setOrigin(0.5, 1);
+    const credit = txt(this, cx, height - 22, "Art: the Tuxemon project & contributors (CC BY-SA) · Arrows/WASD · E · TAB · SHIFT", 13, "#dfe8f0").setOrigin(0.5, 1);
     c.add(credit);
     this.paintTitle();
   }
@@ -570,7 +561,7 @@ export class UI extends Phaser.Scene {
     const { width, height } = this.scale;
     const r = this.add.rectangle(0, 0, width, height, 0x0b1530, 0).setOrigin(0).setDepth(600);
     const t = txt(this, width / 2, height / 2 - 20, text, 26, "#fff4dc").setOrigin(0.5).setDepth(601).setAlpha(0);
-    const d = txt(this, width / 2, height / 2 + 24, `Day ${nextDay}`, 44, "#ffe066", { fontFamily: PIXEL, fontStyle: "600" }).setOrigin(0.5).setDepth(601).setAlpha(0);
+    const d = txt(this, width / 2, height / 2 + 24, `Day ${nextDay}`, 40, "#ffe066").setOrigin(0.5).setDepth(601).setAlpha(0);
     this.tweens.chain({
       tweens: [
         { targets: r, fillAlpha: 1, duration: 800 },

@@ -3,7 +3,7 @@ import type { Dir } from "../entities/Walker";
 
 const PAD_R = 64;
 const DEAD_ZONE = 12;
-const FONT = "Inter, system-ui, sans-serif";
+const FONT = "Pixelify Sans, monospace";
 
 type Button = {
   id: "a" | "b" | "run";
@@ -38,8 +38,7 @@ export class TouchControls {
     this.root.add(this.pad);
     const mk = (id: Button["id"], r: number, label: string, size: number): Button => {
       const g = scene.add.graphics();
-      const t = scene.add.text(0, 0, label, { fontFamily: FONT, fontSize: `${size}px`, fontStyle: "700", color: "#3b2a1a", resolution: Math.max(2, Math.ceil(window.devicePixelRatio || 1)) }).setOrigin(0.5);
-      t.texture.setFilter(Phaser.Textures.FilterMode.LINEAR);
+      const t = scene.add.text(0, 0, label, { fontFamily: FONT, fontSize: `${size}px`, color: "#3b2a1a", resolution: 2 }).setOrigin(0.5);
       this.root.add([g, t]);
       return { id, r, x: 0, y: 0, label, g, t, pointer: -1 };
     };
