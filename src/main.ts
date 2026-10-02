@@ -6,7 +6,10 @@ import { World } from "./scenes/World";
 async function start() {
   // wait for the pixel font so text renders crisp from the first frame
   try {
-    await Promise.race([document.fonts.load('16px "Pixelify Sans"'), new Promise((r) => setTimeout(r, 2500))]);
+    await Promise.race([
+      Promise.all(['16px "Pixelify Sans"', '500 16px "Inter"', '600 16px "Inter"', '700 16px "Inter"'].map((f) => document.fonts.load(f))),
+      new Promise((r) => setTimeout(r, 2500)),
+    ]);
   } catch { /* fall back to monospace */ }
 
   const game = new Phaser.Game({
