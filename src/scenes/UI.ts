@@ -2,13 +2,15 @@ import Phaser from "phaser";
 import { sfx } from "../game/audio";
 import type { Letter } from "../game/letters";
 import { clockText, letterById, type GameState } from "../game/state";
-import { BUILDINGS, VILLAGERS } from "../world/layout";
+import { hearts, tier, voteTally, voters } from "../game/trust";
+import { ALL_BUILDINGS as BUILDINGS, VILLAGERS } from "../world/layout";
 import { TouchControls } from "./TouchControls";
 import type { World } from "./World";
 
 export type Msg = {
   name?: string;
   portrait?: string;
+  hearts?: number; // shown next to the name tag (0–5)
   text: string;
   choices?: { label: string; cb: () => void }[];
 };
@@ -23,10 +25,13 @@ const txt = (s: Phaser.Scene, x: number, y: number, t: string, size: number, col
   s.add.text(x, y, t, { fontFamily: FONT, fontSize: `${size}px`, color, resolution: 2, ...extra });
 
 export type MapInfo = {
+  title: string;
   player: { x: number; y: number };
   targets: { x: number; y: number }[];
-  buildings: { id: string; label: string; x: number; y: number }[];
+  buildings: { id: string; label: string; x: number; y: number; hearts?: number }[];
   regions: { label: string; x: number; y: number; locked: boolean }[];
+  /** Mail waiting on the other map. */
+  elsewhere?: string;
 };
 
 // Short names for the map on small screens.
@@ -61,6 +66,11 @@ export class UI extends Phaser.Scene {
   bagPanel!: Phaser.GameObjects.Container;
 
   mapOpen = false;
+  folkOpen = false;
+  folkPanel!: Phaser.GameObjects.Container;
+  votePill!: Phaser.GameObjects.Container;
+  voteText!: Phaser.GameObjects.Text;
+  nameHearts!: Phaser.GameObjects.Container;
   mapPanel!: Phaser.GameObjects.Container;
 
   hud!: Phaser.GameObjects.Container;
@@ -93,6 +103,7 @@ export class UI extends Phaser.Scene {
     this.letterCard = this.add.container(0, 0).setDepth(300).setVisible(false);
     this.bagPanel = this.add.container(0, 0).setDepth(250).setVisible(false);
     this.mapPanel = this.add.container(0, 0).setDepth(260).setVisible(false);
+    this.folkPanel = this.add.container(0, 0).setDepth(270).setVisible(false);
     this.prompt = txt(this, 0, 0, "", 16, "#fff4dc", { backgroundColor: "#1d2b3acc", padding: { x: 12, y: 6 } }).setOrigin(0.5, 1).setDepth(100).setVisible(false);
 
     const kb = this.input.keyboard!;
@@ -149,7 +160,7 @@ export class UI extends Phaser.Scene {
     if (this.touch.enabled) {
       // keep the bottom clear for the pad: friends tuck under the HUD, prompt floats above
       this.prompt.setPosition(width / 2, height - this.touch.reservedHeight - 8);
-      this.friendsRow.setPosition(14, 14 + 80 + 10 + 46).setScale(0.8);
+      this.friendsRow.setPosition(14, 14 + 120 + 10 + 46).setScale(0.8);
     } else {
       this.prompt.setPosition(width / 2, height - 18);
       this.friendsRow.setPosition(14, height - 14).setScale(1);
@@ -174,6 +185,15 @@ export class UI extends Phaser.Scene {
     const env = this.add.image(154, 51, "envelope").setScale(2);
     this.hudBag = txt(this, 170, 40, "", 17);
     this.hud.add([g, this.hudDay, this.hudClock, coin, this.hudCoins, snack, this.hudSnacks, env, this.hudBag]);
+
+    // the big goal, always visible: Council votes
+    this.votePill = this.add.container(0, 88);
+    const pg = this.add.graphics();
+    pg.fillStyle(NAVY, 0.88).fillRoundedRect(0, 0, 216, 30, 15);
+    pg.lineStyle(2, 0xffe066, 0.8).strokeRoundedRect(0, 0, 216, 30, 15);
+    this.voteText = txt(this, 36, 6, "", 15, "#fff4dc");
+    this.votePill.add([pg, this.add.image(18, 15, "ballot").setScale(2), this.voteText]);
+    this.hud.add(this.votePill);
     this.friendsRow = this.add.container(0, 0).setDepth(100).setVisible(false);
   }
 
@@ -187,6 +207,9 @@ export class UI extends Phaser.Scene {
     this.hudCoins.setText(`${s.coins}`);
     this.hudSnacks.setText(`${s.snacks}`);
     this.hudBag.setText(`${s.bag.length}`);
+    const tally = voteTally(s);
+    const left = Math.max(0, s.voteDay - s.day);
+    this.voteText.setText(s.voteWon ? "Post office saved! ♥" : `Votes ${tally.forYou}/${tally.needed} · ${left === 0 ? "vote today" : `${left} days left`}`);
 
     this.touch.showRun = friends.some((f) => f.id === "bzz");
     const key = friends.map((f) => f.id + f.locked).join();
@@ -211,12 +234,13 @@ export class UI extends Phaser.Scene {
   }
 
   // Off-screen arrows pointing at mailboxes that need mail.
-  updateArrows(targets: { x: number; y: number }[], cam: Phaser.Cameras.Scene2D.Camera) {
+  updateArrows(targets: { x: number; y: number; label?: string }[], cam: Phaser.Cameras.Scene2D.Camera) {
     while (this.arrows.length < targets.length) {
       const c = this.add.container(0, 0).setDepth(90);
       const tri = this.add.triangle(0, 0, 0, -9, 18, 0, 0, 9, 0xe74c3c).setStrokeStyle(2, 0x5a1a10);
       const env = this.add.image(-16, 0, "envelope").setScale(2);
-      c.add([tri, env]);
+      const lbl = txt(this, 0, 0, "", 14, "#fff4dc", { backgroundColor: "#1d2b3add", padding: { x: 6, y: 3 } }).setOrigin(0.5);
+      c.add([tri, env, lbl]);
       this.arrows.push(c);
     }
     const { width, height } = this.scale;
@@ -236,6 +260,12 @@ export class UI extends Phaser.Scene {
       (a.list[0] as Phaser.GameObjects.Triangle).setRotation(ang);
       const env = a.list[1] as Phaser.GameObjects.Image;
       env.setPosition(-Math.cos(ang) * 22, -Math.sin(ang) * 22 + Math.sin(this.time.now / 200) * 2);
+      const lbl = a.list[2] as Phaser.GameObjects.Text;
+      lbl.setVisible(!!t.label);
+      if (t.label) {
+        if (lbl.text !== t.label) lbl.setText(t.label);
+        lbl.setPosition(-Math.cos(ang) * 52, -Math.sin(ang) * 30 + 22);
+      }
     });
   }
 
@@ -256,7 +286,8 @@ export class UI extends Phaser.Scene {
     this.dialogMore = txt(this, 0, 0, "▼", 16, "#b0503a").setOrigin(1, 1);
     this.measure = txt(this, 0, 0, "", 21, INK, { lineSpacing: 6 }).setVisible(false);
     this.tweens.add({ targets: this.dialogMore, alpha: 0.2, yoyo: true, repeat: -1, duration: 400 });
-    this.dialog.add([this.dialogBg, this.dialogPortrait, this.dialogName, this.dialogText, this.dialogMore]);
+    this.nameHearts = this.add.container(0, 0);
+    this.dialog.add([this.dialogBg, this.dialogPortrait, this.dialogName, this.nameHearts, this.dialogText, this.dialogMore]);
   }
 
   /** Lays out the dialogue box; it grows to fit the message and goes compact on phones. */
@@ -285,6 +316,7 @@ export class UI extends Phaser.Scene {
     }
     const tx = x + textOffset;
     this.dialogName.setPosition(tx, y - 16);
+    this.nameHearts.setPosition(tx + this.dialogName.width + 8, y - 6);
     this.dialogText.setPosition(tx, y + 22);
     this.dialogMore.setPosition(x + w - 14, y + h - 8);
     this.choiceTexts.forEach((c, i) => c.setPosition(x + w - 22, y - 18 - (this.choiceTexts.length - i) * 38));
@@ -318,6 +350,8 @@ export class UI extends Phaser.Scene {
     this.current = m;
     this.dialog.setVisible(true);
     this.dialogName.setVisible(!!m.name).setText(m.name ?? "");
+    this.nameHearts.removeAll(true);
+    if (m.hearts !== undefined) this.heartRow(this.nameHearts, 0, 0, m.hearts, 2);
     if (m.portrait && this.textures.exists(`portrait-${m.portrait}`)) {
       this.dialogPortrait.setTexture(`portrait-${m.portrait}`).setVisible(true).setCrop(64, 0, 64, 64);
       // texture is 128 wide; the art sits in the right half
@@ -385,12 +419,13 @@ export class UI extends Phaser.Scene {
   }
 
   isBusy() {
-    return !!this.current || this.letterOpen || this.bagOpen || this.mapOpen || !!this.title;
+    return !!this.current || this.letterOpen || this.bagOpen || this.mapOpen || this.folkOpen || !!this.title;
   }
 
   advance() {
     if (this.letterOpen) return this.closeLetter();
     if (this.bagOpen) return this.toggleBag();
+    if (this.folkOpen) return this.toggleFolk();
     if (this.mapOpen) return this.toggleMap();
     const m = this.current;
     if (!m) return;
@@ -481,7 +516,7 @@ export class UI extends Phaser.Scene {
     g.fillStyle(PAPER_EDGE, 1).fillRoundedRect(ox - 10, oy - 10, dw + 20, dh + 20, 14);
     p.add(g);
     p.add(this.add.image(ox, oy, "worldmap").setOrigin(0).setScale(s));
-    p.add(txt(this, width / 2, oy - 22, "Seabreeze Bay", compact ? 22 : 28, "#ffe8a8", { stroke: "#1d2b3a", strokeThickness: 6 }).setOrigin(0.5, 1));
+    p.add(txt(this, width / 2, oy - 22, info.title, compact ? 22 : 28, "#ffe8a8", { stroke: "#1d2b3a", strokeThickness: 6 }).setOrigin(0.5, 1));
 
     const tag = (x: number, y: number, label: string, size: number, color: string, bg: string) =>
       p.add(txt(this, x, y, label, size, color, { backgroundColor: bg, padding: { x: 5, y: 2 } }).setOrigin(0.5, 1));
@@ -493,6 +528,7 @@ export class UI extends Phaser.Scene {
     }
     for (const b of info.buildings) {
       const pt = at(b.x, b.y);
+      if (b.hearts !== undefined) this.heartRow(p, pt.x - (compact ? 15 : 22), pt.y + 2, b.hearts, compact ? 1 : 1.5);
       tag(pt.x, pt.y, compact ? SHORT_LABELS[b.id] ?? b.label : b.label, compact ? 11 : 14, INK, "#fff4dcdd");
     }
     for (const t of info.targets) {
@@ -508,11 +544,76 @@ export class UI extends Phaser.Scene {
     this.tweens.add({ targets: ring, scale: 1.6, alpha: 0, repeat: -1, duration: 900 });
     tag(me.x, me.y - (compact ? 10 : 14), "You", compact ? 12 : 14, "#ffffff", "#e74c3c");
 
-    const legend = info.targets.length ? `✉ = mail to deliver (${info.targets.length})` : "No mail waiting right now";
+    const here = info.targets.length ? `✉ = mail to deliver (${info.targets.length})` : "No mail to deliver here";
+    const legend = info.elsewhere ? `${here}  ·  more in ${info.elsewhere}` : here;
+    const folkBtn = txt(this, ox + dw, oy - 22, compact ? "Townsfolk ▸" : "T · Townsfolk ▸", compact ? 14 : 16, INK, { backgroundColor: "#ffe066", padding: { x: 10, y: 5 } })
+      .setOrigin(1, 1).setInteractive({ useHandCursor: true });
+    folkBtn.on("pointerdown", (_p: unknown, _x: unknown, _y: unknown, e: Phaser.Types.Input.EventData) => {
+      e.stopPropagation();
+      const w = this.world();
+      this.toggleMap();
+      this.toggleFolk(w.state);
+    });
+    p.add(folkBtn);
     p.add(txt(this, width / 2, oy + dh + 18, `${legend}   ·   ${compact ? "tap" : "M / tap"} to close`, compact ? 13 : 16, "#fff4dc").setOrigin(0.5, 0));
     p.setVisible(true).setAlpha(0);
     this.tweens.add({ targets: p, alpha: 1, duration: 180 });
     this.mapOpen = true;
+    sfx.open();
+  }
+
+  /** A row of 5 hearts, filled up to n. */
+  heartRow(parent: Phaser.GameObjects.Container, x: number, y: number, n: number, scale: number) {
+    for (let i = 0; i < 5; i++) {
+      const h = this.add.image(x + i * 8 * scale, y, "heart").setScale(scale).setOrigin(0, 0.5);
+      if (i >= n) h.setTint(0x5a4a4a).setAlpha(0.45);
+      parent.add(h);
+    }
+  }
+
+  // ── Townsfolk (trust overview) ──────────────────────────────
+  toggleFolk(s?: GameState) {
+    if (this.folkOpen || !s) {
+      this.folkOpen = false;
+      this.folkPanel.setVisible(false).removeAll(true);
+      sfx.blip();
+      return;
+    }
+    if (this.current || this.letterOpen || this.bagOpen || this.mapOpen) return;
+    const { width, height } = this.scale;
+    const compact = width < 560;
+    const list = voters();
+    const cols = compact ? 1 : 2;
+    const rowH = compact ? 50 : 58;
+    const rows = Math.ceil(list.length / cols);
+    const w = Math.min(compact ? width - 20 : 860, width - 20);
+    const h = Math.min(height - 20, 120 + rows * rowH);
+    const p = this.folkPanel;
+    p.removeAll(true);
+    const g = this.add.graphics();
+    g.fillStyle(0x0b1530, 0.6).fillRect(-width, -height, width * 3, height * 3);
+    g.fillStyle(PAPER_EDGE, 1).fillRoundedRect(-w / 2, -h / 2, w, h, 16);
+    g.fillStyle(PAPER, 1).fillRoundedRect(-w / 2 + 8, -h / 2 + 8, w - 16, h - 16, 12);
+    p.add(g);
+    const tally = voteTally(s);
+    p.add(txt(this, 0, -h / 2 + 20, "Townsfolk", compact ? 22 : 26, "#b0503a").setOrigin(0.5, 0));
+    p.add(txt(this, 0, -h / 2 + (compact ? 50 : 56), `Council votes for you: ${tally.forYou} / ${tally.needed} needed  ·  3 hearts = a vote`, compact ? 12 : 15, "#8a6a4a").setOrigin(0.5, 0));
+    const colW = (w - 40) / cols;
+    list.forEach((v, i) => {
+      const t = s.trust[v.id] ?? 0;
+      const c = i % cols, r = Math.floor(i / cols);
+      const x = -w / 2 + 20 + c * colW, y = -h / 2 + (compact ? 80 : 90) + r * rowH;
+      const votes = t >= 60;
+      g.fillStyle(votes ? 0xfff0b8 : 0xf3e6c8, 1).fillRoundedRect(x, y, colW - 10, rowH - 8, 8);
+      p.add(this.add.sprite(x + 20, y + rowH - 12, v.sprite, 1).setOrigin(0.5, 1).setScale(compact ? 1.2 : 1.4));
+      p.add(txt(this, x + 42, y + 4, v.name, compact ? 14 : 16));
+      this.heartRow(p, x + 42, y + (compact ? 30 : 34), hearts(t), compact ? 1.5 : 1.8);
+      p.add(txt(this, x + (compact ? 120 : 140), y + (compact ? 22 : 26), `${tier(t).name}${votes ? "  ✓ vote" : ""}${compact ? "" : `  ·  ${v.likes ?? ""}`}`, compact ? 11 : 13, votes ? "#2e7d32" : "#8a6a4a",
+        { fixedWidth: colW - (compact ? 130 : 152) }));
+    });
+    p.add(txt(this, 0, h / 2 - 26, "T / tap to close", 14, "#8a6a4a").setOrigin(0.5, 0));
+    p.setPosition(width / 2, height / 2).setVisible(true);
+    this.folkOpen = true;
     sfx.open();
   }
 
@@ -670,10 +771,12 @@ export class UI extends Phaser.Scene {
       "✦ Lantern Night ✦",
       "Hundreds of paper lanterns drift up over Seabreeze Bay.",
       "Out on the island, the old lighthouse flickers… and blazes to life.",
+      "The Council voted. The Seabreeze Post Office stays open.",
+      "Vane watches the lighthouse blink from the pier. He doesn't say anything. He doesn't need to.",
       "On the pier, Granny Marigold and Captain Barnaby share a quiet cup of tea.",
       "Finn wears a tie. Rosa wears a flower crown. Tobi and Shelly count the lanterns (they lose count).",
       "Pip, Rocky and Bzz fall asleep in a heap on your mailbag.",
-      "Every word that brought them here passed through your hands.",
+      "Grandma Marlo would be so proud. Every word that brought them here passed through your hands.",
       "Thank you for delivering. ♥",
     ];
     const t = txt(this, width / 2, height / 2, "", 26, "#fff4dc", { align: "center", wordWrap: { width: Math.min(700, width - 60) }, stroke: "#0b1530", strokeThickness: 6 })

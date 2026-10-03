@@ -1,7 +1,7 @@
 // Every piece of mail in Seabreeze Bay. Story threads unlock as you befriend
 // monsters (Rocky → cliffside, Pip's swim → Lighthouse Isle) and deliver earlier letters.
 
-export type Requirement = "smash" | "swim";
+export type Requirement = "smash" | "swim" | "sortingRoom";
 
 export type Letter = {
   id: string;
@@ -13,10 +13,22 @@ export type Letter = {
   after?: string; // only appears once this letter has been delivered
   reply?: string; // handing this over gives you another letter on the spot
   parcel?: boolean;
+  fromDay?: number; // not sent before this day
+  marlo?: boolean; // one of grandma's unsent letters (big trust boost)
 };
 
 export const LETTERS: Letter[] = [
-  // ── Day one ────────────────────────────────────────────────
+  // ── Day one: the stakes ───────────────────────────────────
+  {
+    id: "mayor1", to: "mayor", from: "Swiftline Logistics",
+    title: "Notice: The Council Vote",
+    body: "Dear Mayor Hollyhock,\nAs agreed, the Council will vote in 20 days on our offer to replace the Seabreeze Post Office with a modern Swiftline Hub.\nProgress waits for no one.\n— H. Vane, Director",
+  },
+  {
+    id: "dot1", to: "dot", from: "Mainland Mills", parcel: true,
+    title: "Parcel: Flour (10 sacks)",
+    body: "Your flour order. Note: Swiftline now offers Flour-by-Drone. It arrives faster. Mostly in the sea.",
+  },
   {
     id: "granny1", to: "granny", from: "Seed & Sprout Catalog",
     title: "Spring Seed Catalog",
@@ -31,6 +43,32 @@ export const LETTERS: Letter[] = [
     id: "rosa1", to: "rosa", from: "???",
     title: "A Folded Poem",
     body: "Roses are red, the sea is quite blue,\nI smell like old fish, but I think of you.\n\n(no signature, just a tiny drawing of a hook)",
+  },
+  {
+    id: "pell1", to: "pell", from: "Swiftline Logistics",
+    title: "Bulk Postage Discount!",
+    body: "Valued partner! Switch your shop's post to Swiftline and save 30%. Drones never need lunch breaks, or small talk.",
+  },
+  {
+    id: "sable1", to: "sable", from: "Velvet & Thread Co.", parcel: true,
+    title: "Parcel: Fabric Swatches",
+    body: "Swatches enclosed: Seafoam, Sunset, and 'Courier Blue' (strangely popular this season).",
+  },
+  // ── Grandma Marlo's unsent letters, found in the sorting trays ──
+  {
+    id: "marlo_pell", to: "pell", from: "Marlo (an old letter, never sent)", fromDay: 4, marlo: true,
+    title: "To Pell, Finally",
+    body: "Pell, your father taught me to love good paper. I never thanked him. So I'm thanking you: every letter I ever delivered was a little bit his. — Marlo",
+  },
+  {
+    id: "marlo_finn", to: "finn", from: "Marlo (an old letter, never sent)", fromDay: 8, marlo: true,
+    title: "To Finn, Who Doesn't Like Fuss",
+    body: "Finn. You pretend you don't want mail. I've seen you wait at the window. Someone in this town is going to write to you one day, and I hope you write back. — M.",
+  },
+  {
+    id: "marlo_mayor", to: "mayor", from: "Marlo (an old letter, never sent)", fromDay: 12, marlo: true,
+    title: "To the Mayor (Before You Were Mayor)",
+    body: "Hollyhock, you used to deliver papers with me when you were small. You said a town is just people who write to each other. Don't forget that, whatever they offer you. — Marlo",
   },
   // ── Day two-ish ────────────────────────────────────────────
   {
@@ -112,12 +150,13 @@ export const LETTERS: Letter[] = [
   {
     id: "mo3", to: "mo", from: "Seabreeze Town Council", after: "captain2", requires: "swim",
     title: "Festival Supplies Order",
-    body: "Please stock lanterns, streamers and 300 snacks. The Lantern Night festival is back on: Captain Barnaby has promised to relight the lighthouse!",
+    body: "Please stock lanterns, streamers and 300 snacks. If the Council votes to keep the post office, Lantern Night is back on: Captain Barnaby has promised to relight the lighthouse!",
   },
+  // ── The twist: found when you open the old sorting room ─────
   {
-    id: "gullfinal", to: "granny", from: "Everyone in Seabreeze Bay", after: "mo3",
-    title: "Invitation: Lantern Night",
-    body: "You are invited to Lantern Night on the pier. Bring someone you've been writing to. The lighthouse will be lit for the first time in forty years. ♥",
+    id: "vane1", to: "vane", from: "Mum (postmarked 30 years ago)", requires: "sortingRoom",
+    title: "The Undelivered Letter",
+    body: "My dear Hollis,\nI'm sorry I left without saying goodbye. I'll write to you every single week, I promise.\nWatch the lighthouse. When it blinks, that's me thinking of you.\n— Mum",
   },
 ];
 

@@ -2,7 +2,7 @@
 
 export const CHATTER: Record<string, [string[], string[], string[]]> = {
   gull: [
-    ["Mail doesn't deliver itself! Well. It does now. You're it."],
+    ["Mail doesn't deliver itself! Well. It does now. You're it.", "Win them over one letter at a time. Hearts become votes, votes save the post office."],
     ["Fine work, courier. The bay hasn't been this chatty in years."],
     ["You know, I was a courier once. Then I took a seagull to the knee."],
   ],
@@ -47,6 +47,35 @@ export const CHATTER: Record<string, [string[], string[], string[]]> = {
     ["There's a glow on the shore at night. Like flowers. Can't be, surely."],
   ],
 };
+
+// New faces in the square, plus the villain.
+Object.assign(CHATTER, {
+  dot: [
+    ["Mm. Swiftline drops my flour on the doorstep at 5am. Cheap, at least.", "Bread waits for no one. Neither does Swiftline."],
+    ["You're quick! Bread's still warm when your letters come.", "Try a honey bun. Folks love being brought one."],
+    ["Best courier this town's had since Marlo. Don't tell her I said that. Oh. Sorry, love."],
+  ],
+  pell: [
+    ["Swiftline gives me thirty percent off. Can you beat thirty percent?", "Paper is serious business. So is postage."],
+    ["Your deliveries are… tidy. I respect tidy.", "I sell stamps, you know. For writing to real people."],
+    ["My father would have liked you. He loved this post office."],
+  ],
+  sable: [
+    ["That uniform is a crime against fabric, darling.", "Swiftline drones don't wear anything. Very minimalist. I hate it."],
+    ["Better! You walk like someone people trust now.", "Fancy a new colour? I do house calls. Well, shop calls."],
+    ["You've made this town stylish again. Marlo would be thrilled."],
+  ],
+  mayor: [
+    ["Swiftline's offer is very generous. Very… efficient. I haven't decided.", "The Council votes soon. Make your case, courier. With deliveries."],
+    ["People keep telling me about you. Good things, mostly.", "A town is just people who write to each other. Someone said that once."],
+    ["Between us? I'm voting for the post office. Don't tell Vane."],
+  ],
+  vane: [
+    ["Director Hollis Vane, Swiftline Logistics. Nothing personal. Efficiency is just… kinder.", "My drones don't get tired, lost, or sentimental. Can you say the same?", "Twenty days, courier. Then this square gets a proper hub."],
+    ["You're more stubborn than the numbers said you'd be.", "This town loves its little rituals. Rituals don't scale."],
+    ["I grew up here, you know. I left the day the mail stopped coming."],
+  ],
+});
 
 export function chatter(id: string, hearts: number, day: number): string {
   const tiers = CHATTER[id];

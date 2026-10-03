@@ -1,45 +1,86 @@
 import { LETTERS, fillerLetter, type Letter } from "./letters";
+import { VILLAGERS } from "../world/layout";
 
-const SAVE_KEY = "postal-route-save-v1";
-export const DAY_START = 6 * 60;
-export const DAY_END = 24 * 60;
+const SAVE_KEY = "postal-route-save-v2";
+
+// Shift-based days: time only moves when you finish deliveries.
+export const DAY_START = 8 * 60;
+export const MINUTES_PER_DELIVERY = 35;
+export const EVENING = 18 * 60 + 30;
+
+export const SEASON_DAYS = 20; // the Council votes at the start of this day
 export const SNACK_PRICE = 15;
+export const BUN_PRICE = 20;
+export const DYE_PRICE = 40;
 export const SWIM_AFTER = 6; // deliveries before Pip learns to swim
 
+/** Post office repairs, paid for from the Repair Fund. */
+export const REPAIRS = [
+  { cost: 60, name: "Patch the roof", perk: "The town notices: everyone warms to you a little." },
+  { cost: 120, name: "New sorting desk", perk: "Your mailbag holds one more letter each day." },
+  { cost: 200, name: "Bike rack (and a bike!)", perk: "You get around town faster." },
+  { cost: 320, name: "Open the old sorting room", perk: "Something has been waiting down there for a long time…" },
+];
+
 export type MonsterId = "pip" | "rocky" | "bzz";
+export type TrustEvent = { type: string; who: string; day: number; delta: number; heard: string[] };
 
 export type GameState = {
   day: number;
   minutes: number;
   coins: number;
   snacks: number;
+  buns: number;
   bag: string[];
-  pickedUp: boolean; // collected today's mailbag
+  pickedUp: boolean;
+  pickedUpAt: number; // ms timestamp of today's pickup (for "speedy" bonuses)
   delivered: string[];
   deliveredToday: number;
+  earnedToday: number;
+  swiftlineTook: number;
   friends: MonsterId[];
-  hearts: Record<string, number>;
+  trust: Record<string, number>;
+  chattedToday: string[];
+  giftedToday: string[];
+  events: TrustEvent[];
+  repairFund: number;
+  repairs: number;
   bouldersSmashed: boolean;
   canSwim: boolean;
+  voteDay: number;
+  voteWon: boolean;
+  vaneSoftened: boolean;
   festivalSeen: boolean;
-  extraLetters: Record<string, Letter>; // procedurally written post-story mail
+  extraLetters: Record<string, Letter>;
   introSeen: boolean;
+  metVane: boolean;
   uniform: number;
+};
+
+// Where everyone starts. Marigold knew your grandma; the shopkeepers have been charmed by Swiftline's prices.
+const START_TRUST: Record<string, number> = {
+  granny: 35, rosa: 20, dot: 15, pell: 5, sable: 10, mayor: 25,
+  mo: 20, ada: 22, finn: 8, shelly: 18, tobi: 30, captain: 15,
 };
 
 export function newGame(): GameState {
   return {
-    day: 1, minutes: DAY_START, coins: 0, snacks: 0,
-    bag: [], pickedUp: false, delivered: [], deliveredToday: 0,
-    friends: ["pip"], hearts: {}, bouldersSmashed: false, canSwim: false,
-    festivalSeen: false, extraLetters: {}, introSeen: false, uniform: 0,
+    day: 1, minutes: DAY_START, coins: 0, snacks: 0, buns: 0,
+    bag: [], pickedUp: false, pickedUpAt: 0, delivered: [], deliveredToday: 0, earnedToday: 0, swiftlineTook: 0,
+    friends: ["pip"], trust: { ...START_TRUST }, chattedToday: [], giftedToday: [], events: [],
+    repairFund: 0, repairs: 0, bouldersSmashed: false, canSwim: false,
+    voteDay: SEASON_DAYS, voteWon: false, vaneSoftened: false, festivalSeen: false,
+    extraLetters: {}, introSeen: false, metVane: false, uniform: 0,
   };
 }
 
 export function load(): GameState | null {
   try {
     const raw = localStorage.getItem(SAVE_KEY);
-    return raw ? { ...newGame(), ...JSON.parse(raw) } : null;
+    if (!raw) return null;
+    const s = { ...newGame(), ...JSON.parse(raw) } as GameState;
+    s.trust = { ...START_TRUST, ...s.trust };
+    return s;
   } catch {
     return null;
   }
@@ -66,32 +107,45 @@ function available(s: GameState, l: Letter) {
   if (l.after && !s.delivered.includes(l.after)) return false;
   if (l.requires === "smash" && !s.bouldersSmashed) return false;
   if (l.requires === "swim" && !s.canSwim) return false;
+  if (l.requires === "sortingRoom" && s.repairs < 4) return false;
+  if (l.fromDay && s.day < l.fromDay) return false;
   // replies are handed over in person, never sorted at the post office
   if (LETTERS.some((o) => o.reply === l.id)) return false;
   return true;
 }
 
-/** Fill the mailbag for today. Returns the new letter ids. */
-export function packBag(s: GameState): string[] {
-  const size = s.day === 1 ? 3 : 4;
-  const fresh = LETTERS.filter((l) => available(s, l)).slice(0, size).map((l) => l.id);
-  // quiet story days get topped up with everyday mail (only to people you can reach)
-  const who = ["granny", "mo", "ada", "shelly", "rosa", "finn"];
-  if (s.bouldersSmashed) who.push("tobi");
-  if (s.canSwim) who.push("captain");
-  const minimum = s.day === 1 ? 3 : storyComplete(s) ? 4 : 3;
-  for (let n = 0; fresh.length < minimum && s.delivered.length >= 3; n++) {
+/** People you can currently reach. */
+export function reachable(s: GameState) {
+  const who = VILLAGERS.filter((v) => v.voter).map((v) => v.id);
+  return who.filter((id) => (id !== "tobi" || s.bouldersSmashed) && (id !== "captain" || s.canSwim));
+}
+
+/**
+ * Fill today's mailbag. Story letters always come to you; everyday mail from people
+ * who don't trust you yet may go to Swiftline instead.
+ */
+export function packBag(s: GameState, rand = Math.random): { fresh: string[]; diverted: number } {
+  const size = (s.day === 1 ? 3 : 4) + (s.repairs >= 2 ? 1 : 0);
+  const story = LETTERS.filter((l) => available(s, l)).slice(0, size).map((l) => l.id);
+  const fresh = [...story];
+  let diverted = 0;
+  const who = reachable(s);
+  const target = Math.max(size, 3);
+  for (let n = 0; fresh.length < target && n < 12; n++) {
     const l = fillerLetter(s.day, n, who);
+    const t = s.trust[l.to] ?? 0;
+    const lostChance = t < 25 ? 0.5 : t < 60 ? 0.2 : 0;
+    if (s.day > 1 && rand() < lostChance) {
+      diverted++;
+      continue;
+    }
     s.extraLetters[l.id] = l;
     fresh.push(l.id);
   }
   s.bag.push(...fresh);
   s.pickedUp = true;
-  return fresh;
-}
-
-export function storyComplete(s: GameState) {
-  return s.delivered.includes("gullfinal");
+  s.swiftlineTook = diverted;
+  return { fresh, diverted };
 }
 
 export function clockText(minutes: number) {

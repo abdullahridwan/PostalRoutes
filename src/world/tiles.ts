@@ -36,6 +36,34 @@ export const SHORE_TILES: Record<number, number> = {
   14: O(831), 13: O(830), 11: O(794), 7: O(793),
 };
 
+const C = (i: number) => gid("core_city_and_country", i);
+
+/** Cobblestone: a seamless 2x2 pattern, indexed [y % 2][x % 2]. */
+export const COBBLE = [[C(613), C(614)], [C(653), C(654)]];
+
+/** 3x3 fountain; animation frames sit 3 tiles apart in the sheet. */
+export const FOUNTAIN = {
+  rows: [[C(382), C(383), C(384)], [C(422), C(423), C(424)], [C(462), C(463), C(464)]],
+  frameOffsets: [0, 3, 6],
+};
+
+/** 5x4 market stall: striped awning, posts, counter, plus produce crates. */
+const N = null;
+export const STALL = {
+  base: [
+    [C(938), C(939), C(940), C(941), C(942)],
+    [C(978), C(979), C(980), C(981), C(982)],
+    [C(1018), C(1019), C(1020), C(1021), C(1022)],
+    [C(1058), C(1059), C(1060), C(1061), C(1062)],
+  ],
+  crates: [
+    [N, N, N, N, N],
+    [N, N, N, N, N],
+    [N, C(826), C(827), C(828), N],
+    [N, C(866), C(867), C(868), N],
+  ] as (number | null)[][],
+};
+
 // 2x3 pine tree: canopy row renders above the player.
 export const TREE = {
   canopy: [O(1024), O(1025)],

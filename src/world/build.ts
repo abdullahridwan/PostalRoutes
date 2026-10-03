@@ -1,7 +1,7 @@
 // Turns the code layout into tile layers + a collision grid.
 import stampsJson from "../data/stamps.json";
-import { BUILDINGS, BOULDERS, H, PIERS, W, terrain, type Terrain } from "./layout";
-import { FLOWERS, GRASS, PATH_TILES, SHORE_TILES, TREE, WATER_FRAMES, gid } from "./tiles";
+import type { MapDef, Terrain } from "./layout";
+import { COBBLE, FLOWERS, FOUNTAIN, GRASS, PATH_TILES, SHORE_TILES, STALL, TREE, WATER_FRAMES, gid } from "./tiles";
 
 type StampTile = [string, number] | null;
 type Stamp = { w: number; h: number; layers: { above: boolean; tiles: StampTile[][] }[] };
@@ -14,11 +14,17 @@ export type World = {
   below: LayerGrid[];
   above: LayerGrid[];
   waterCells: { x: number; y: number }[];
+  /** Fountain tiles with their frame-0 gid, for animation. */
+  fountainCells: { x: number; y: number; gid: number }[];
   solid: boolean[][];
   water: boolean[][];
   doors: { id: string; x: number; y: number }[];
   mailboxes: { id: string; x: number; y: number }[];
 };
+
+// The map currently being built (set at the top of buildWorld).
+let W = 0, H = 0;
+let terrain: Terrain[][] = [];
 
 const blank = (): LayerGrid => Array.from({ length: H }, () => Array<number>(W).fill(0));
 
@@ -30,7 +36,9 @@ function at(x: number, y: number): Terrain {
 
 /** Corner mask for a cell of terrain `t`: a corner counts only if all 4 cells sharing it are `t`. */
 function cornerMask(x: number, y: number, t: Terrain): number {
-  const is = (dx: number, dy: number) => at(x + dx, y + dy) === t;
+  // sand paths run flush into the cobbled square
+  const same = (o: Terrain) => o === t || (t === "path" && o === "cobble");
+  const is = (dx: number, dy: number) => same(at(x + dx, y + dy));
   let m = 0;
   if (is(-1, 0) && is(0, -1) && is(-1, -1)) m |= 1; // NW
   if (is(1, 0) && is(0, -1) && is(1, -1)) m |= 2; // NE
@@ -46,7 +54,10 @@ function hash(x: number, y: number) {
   return ((h ^ (h >>> 16)) >>> 0) / 4294967295;
 }
 
-export function buildWorld(): World {
+export function buildWorld(map: MapDef): World {
+  W = map.W;
+  H = map.H;
+  terrain = map.terrain;
   const below = Array.from({ length: BELOW_LAYERS }, blank);
   const above = [blank(), blank()];
   const solid = Array.from({ length: H }, () => Array<boolean>(W).fill(false));
@@ -66,6 +77,8 @@ export function buildWorld(): World {
         if (m !== 15) overlay[y][x] = SHORE_TILES[m] ?? 0;
         water[y][x] = true;
         solid[y][x] = true;
+      } else if (t === "cobble") {
+        ground[y][x] = COBBLE[y % 2][x % 2];
       } else if (t === "path") {
         ground[y][x] = PATH_TILES[cornerMask(x, y, "path")] ?? PATH_TILES[15];
       } else if (t === "flowers") {
@@ -94,7 +107,7 @@ export function buildWorld(): World {
   }
 
   // 3. Piers (walkable over water: middle column)
-  for (const p of PIERS) {
+  for (const p of map.piers) {
     stampAt("pier", p.x, p.y, below, above, () => {});
     for (let j = 0; j < STAMPS.pier.h; j++) {
       solid[p.y + j][p.x + 1] = false;
@@ -105,7 +118,7 @@ export function buildWorld(): World {
   // 4. Buildings
   const doors: World["doors"] = [];
   const mailboxes: World["mailboxes"] = [];
-  for (const b of BUILDINGS) {
+  for (const b of map.buildings) {
     const s = STAMPS[b.stamp];
     stampAt(b.stamp, b.x, b.y, below, above, (x, y) => (solid[y][x] = true));
     for (let j = 0; j < s.h; j++) for (let i = 0; i < s.w; i++) solid[b.y + j][b.x + i] = true;
@@ -119,9 +132,26 @@ export function buildWorld(): World {
     }
   }
 
-  for (const b of BOULDERS) solid[b.y][b.x] = true;
+  for (const b of map.boulders) solid[b.y][b.x] = true;
 
-  return { below, above, waterCells, solid, water, doors, mailboxes };
+  // 5. Town square props
+  const fountainCells: World["fountainCells"] = [];
+  for (const f of map.fountains) {
+    FOUNTAIN.rows.forEach((row, j) => row.forEach((g, i) => {
+      deco1[f.y + j][f.x + i] = g;
+      solid[f.y + j][f.x + i] = true;
+      fountainCells.push({ x: f.x + i, y: f.y + j, gid: g });
+    }));
+  }
+  for (const st of map.stalls) {
+    STALL.base.forEach((row, j) => row.forEach((g, i) => {
+      deco1[st.y + j][st.x + i] = g;
+      solid[st.y + j][st.x + i] = true;
+    }));
+    STALL.crates.forEach((row, j) => row.forEach((g, i) => { if (g) deco2[st.y + j][st.x + i] = g; }));
+  }
+
+  return { below, above, waterCells, fountainCells, solid, water, doors, mailboxes };
 }
 
 function stampAt(

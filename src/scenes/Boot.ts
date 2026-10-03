@@ -4,10 +4,12 @@ import { TILESETS } from "../world/tiles";
 export const CHARACTERS = [
   "postboy", "postboy_red", "postboy_green", "postboy_olive", "swimmer", "penguin", "rockitten", "bee", "professor", "granny", "fisher",
   "florist", "riverboatcaptain", "beachcomber", "shopkeeper", "childactor", "nurse",
+  "shopassistant", "homemaker", "fashionista", "ceo", "magician",
 ];
 export const PORTRAITS = [
   "postboy", "professor", "granny", "fisher", "florist", "riverboatcaptain",
   "beachcomber", "childactor", "nurse", // (shopkeeper portrait is a "?" placeholder upstream)
+  "shopassistant", "homemaker", "fashionista", "ceo", "magician",
 ];
 
 export class Boot extends Phaser.Scene {
@@ -23,6 +25,7 @@ export class Boot extends Phaser.Scene {
     for (const c of CHARACTERS) this.load.spritesheet(c, `assets/sprites/${c}.png`, { frameWidth: 16, frameHeight: 32 });
     for (const p of PORTRAITS) this.load.image(`portrait-${p}`, `assets/portraits/${p}.png`);
     this.load.image("boulder", "assets/sprites/boulder.png");
+    this.load.image("sign", "assets/sprites/sign.png");
   }
 
   create() {
@@ -157,6 +160,74 @@ function makePixelTextures(scene: Phaser.Scene) {
     ".kyk.",
     ".kkk.",
   ], { k: 0x3a2a10, y: 0xffe066 });
+
+  // Swiftline drone (16x10): grey body, rotors, blinking light
+  draw("drone", 16, 10, [
+    "kkkk........kkkk",
+    ".kk..........kk.",
+    "..k..........k..",
+    "..kkkkkkkkkkkk..",
+    "..kggggggggggk..",
+    "..kgGGGGGGGGgk..",
+    "..kgGbbGGGGGgk..",
+    "..kggggggggrgk..",
+    "...kkkkkkkkkk...",
+    "....k......k....",
+  ], { k: 0x2a2f38, g: 0x8a93a3, G: 0xb6bfcc, b: 0x3a7bd5, r: 0xe74c3c });
+
+  // boarded-up planks (crossed, 16x16) nailed over the post office
+  draw("boards", 16, 16, [
+    "kk............kk",
+    "kbbk........kbbk",
+    "kbBbk......kbBbk",
+    ".kbBbk....kbBbk.",
+    "..kbBbk..kbBbk..",
+    "...kbBbkkbBbk...",
+    "....kbBbbBbk....",
+    ".....kbBnBk.....",
+    ".....kbBBBk.....",
+    "....kbBbbBbk....",
+    "...kbBbkkbBbk...",
+    "..kbBbk..kbBbk..",
+    ".kbBbk....kbBbk.",
+    "kbBbk......kbBbk",
+    "kbbk........kbbk",
+    "kk............kk",
+  ], { k: 0x3a2412, b: 0xe2b77a, B: 0xc48a4a, n: 0x2a2a2a });
+
+  // ballot icon for the vote tally (9x9)
+  draw("ballot", 9, 9, [
+    "..kkkkk..",
+    "..kwwwk..",
+    "..kwrwk..",
+    "kkkkkkkkk",
+    "kbbbbbbbk",
+    "kbbkkkbbk",
+    "kbbbbbbbk",
+    "kbbbbbbbk",
+    "kkkkkkkkk",
+  ], { k: 0x3a2a10, w: 0xfff4dc, r: 0xe74c3c, b: 0xc89f6b });
+
+  // Swiftline sticker (6x6) slapped on mailboxes of people who don't trust you yet
+  draw("sticker", 6, 6, [
+    "kkkkkk",
+    "kGGGGk",
+    "kGbbGk",
+    "kGbGGk",
+    "kGGbGk",
+    "kkkkkk",
+  ], { k: 0x2a2f38, G: 0xd7dde6, b: 0x3a7bd5 });
+
+  // honey bun (8x7)
+  draw("bun", 8, 7, [
+    "..kkkk..",
+    ".kyyyyk.",
+    "kyYyyyYk",
+    "kyyhhyyk",
+    "kyyyyyyk",
+    ".kkkkkk.",
+    "........",
+  ], { k: 0x6b3d12, y: 0xe0a85a, Y: 0xf6d38f, h: 0xf1c40f });
 
   // soft round glow for night lights
   const g = scene.make.graphics({}, false);
