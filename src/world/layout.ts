@@ -104,7 +104,7 @@ const village = (() => {
     boulders: [{ x: 10, y: 16 }, { x: 11, y: 16 }],
     fountains: [],
     stalls: [],
-    warps: [{ x: 30, y: 0, w: 3, h: 1, to: "square", spawn: { x: 19, y: 28, dir: "up" }, label: "Town Square" }],
+    warps: [{ x: 30, y: 0, w: 3, h: 1, to: "square", spawn: { x: 23, y: 32, dir: "up" }, label: "Town Square" }],
     regions: [
       { label: "Cliffside", x: 12, y: 14.6, lock: "smash" },
       { label: "Flower Meadow", x: 56.5, y: 9.6 },
@@ -116,36 +116,50 @@ const village = (() => {
 })();
 
 // ═══ Town Square ══════════════════════════════════════════════
+// A real square: the Post Office faces the fountain from the north, shops sit
+// round the edges at different depths, and Swiftline's depot looms in the SE corner.
 const square = (() => {
-  const W = 40, H = 30;
+  const W = 48, H = 34;
   const { grid, rect } = painter(W, H);
-  rect("forest", 0, 0, W, 6);
-  rect("forest", 0, 0, 2, H);
-  rect("forest", 38, 0, 2, H);
-  rect("forest", 0, 26, W, 4);
-  rect("cobble", 2, 12, 36, 14); // the square itself
-  rect("path", 18, 26, 3, 4); // road home to the village
-  rect("flowers", 14, 10, 2, 2);
-  rect("flowers", 21, 10, 2, 2);
-  rect("flowers", 28, 10, 2, 2);
-  rect("flowers", 35, 8, 3, 3);
+  // forest frame
+  rect("forest", 0, 0, W, 5);
+  rect("forest", 0, 0, 3, H);
+  rect("forest", 45, 0, 3, H);
+  rect("forest", 0, 31, W, 3);
+  rect("forest", 3, 6, 5, 5); // little groves
+  rect("forest", 3, 25, 6, 5);
+  rect("forest", 40, 6, 4, 6);
+  // the cobbled plaza, plus a forecourt in front of every shop door
+  rect("cobble", 12, 13, 24, 18);
+  rect("cobble", 21, 10, 5, 3); // Post Office forecourt
+  rect("cobble", 9, 12, 6, 2); // Stationery
+  rect("cobble", 34, 11, 5, 3); // Tailor
+  rect("cobble", 5, 21, 8, 3); // Bakery
+  rect("cobble", 36, 20, 8, 3); // Mart
+  rect("cobble", 36, 29, 8, 2); // Swiftline depot
+  rect("path", 22, 31, 3, 3); // road home to the village
+  // flowers
+  rect("flowers", 16, 7, 3, 2);
+  rect("flowers", 27, 7, 3, 2);
+  rect("flowers", 9, 15, 3, 2);
+  rect("flowers", 38, 14, 3, 2);
 
   const def: MapDef = {
     id: "square", name: "Town Square", W, H, terrain: grid,
     buildings: [
-      { id: "bakery", stamp: "house_brick", x: 3, y: 8, door: 3, owner: "dot", label: "Dot's Bakery" },
-      { id: "stationery", stamp: "house_orange", x: 9, y: 8, door: 3, owner: "pell", label: "Pell's Stationery" },
-      { id: "post", stamp: "post_office", x: 16, y: 8, door: 3, label: "Post Office" },
-      { id: "tailor", stamp: "cabin_red", x: 23, y: 6, door: 3, owner: "sable", label: "Sable's Tailor" },
-      { id: "mart", stamp: "mart", x: 30, y: 8, door: 2, owner: "mo", label: "Mo's Mart" },
-      { id: "depot", stamp: "warehouse", x: 30, y: 19, door: 4, label: "Swiftline Depot" },
+      { id: "post", stamp: "post_office", x: 20, y: 6, door: 3, label: "Post Office" },
+      { id: "stationery", stamp: "house_orange", x: 8, y: 8, door: 3, owner: "pell", label: "Pell's Stationery" },
+      { id: "tailor", stamp: "cabin_red", x: 33, y: 5, door: 3, owner: "sable", label: "Sable's Tailor" },
+      { id: "bakery", stamp: "house_brick", x: 4, y: 17, door: 3, owner: "dot", label: "Dot's Bakery" },
+      { id: "mart", stamp: "mart", x: 40, y: 16, door: 2, owner: "mo", label: "Mo's Mart" },
+      { id: "depot", stamp: "warehouse", x: 37, y: 25, door: 4, label: "Swiftline Depot" },
     ],
     piers: [],
     boulders: [],
-    fountains: [{ x: 18, y: 16 }],
-    stalls: [{ x: 4, y: 16 }, { x: 23, y: 16 }],
-    warps: [{ x: 18, y: 29, w: 3, h: 1, to: "village", spawn: { x: 31, y: 1, dir: "down" }, label: "Village" }],
-    regions: [{ label: "↓ Village", x: 19.5, y: 27.5 }],
+    fountains: [{ x: 22, y: 17 }],
+    stalls: [{ x: 13, y: 24 }, { x: 29, y: 22 }],
+    warps: [{ x: 22, y: 33, w: 3, h: 1, to: "village", spawn: { x: 31, y: 1, dir: "down" }, label: "Village" }],
+    regions: [{ label: "↓ Village", x: 23.5, y: 31.5 }],
   };
   return def;
 })();
@@ -173,27 +187,27 @@ export type VillagerDef = {
 
 export const VILLAGERS: VillagerDef[] = [
   // Town Square
-  { id: "gull", name: "Postmaster Gull", sprite: "professor", map: "square", x: 21, y: 12, wander: 0 },
-  { id: "vane", name: "Director Vane", sprite: "magician", map: "square", x: 28, y: 22, wander: 0 },
-  { id: "dot", name: "Dot the Baker", sprite: "homemaker", map: "square", x: 5, y: 12, wander: 1, voter: true,
-    friends: ["mo", "ada"], hangout: { map: "square", x: 12, y: 22 }, likes: "Fast deliveries (bread goes stale!)" },
-  { id: "pell", name: "Pell the Stationer", sprite: "shopassistant", map: "square", x: 10, y: 12, wander: 1, voter: true,
-    friends: ["mo", "sable", "mayor"], hangout: { map: "square", x: 16, y: 22 }, likes: "Neat, on-time post" },
-  { id: "sable", name: "Sable the Tailor", sprite: "fashionista", map: "square", x: 24, y: 12, wander: 1, voter: true,
-    friends: ["rosa", "pell"], hangout: { map: "square", x: 17, y: 22 }, likes: "A sharp uniform" },
-  { id: "mo", name: "Mo", sprite: "shopkeeper", map: "square", x: 31, y: 13, wander: 0, voter: true,
-    friends: ["finn", "dot", "pell"], hangout: { map: "square", x: 22, y: 21 }, likes: "Monsters being well fed" },
-  { id: "mayor", name: "Mayor Hollyhock", sprite: "ceo", map: "square", x: 12, y: 19, wander: 3, voter: true,
+  { id: "gull", name: "Postmaster Gull", sprite: "professor", map: "square", x: 25, y: 11, wander: 0 },
+  { id: "vane", name: "Director Vane", sprite: "magician", map: "square", x: 35, y: 26, wander: 0 },
+  { id: "dot", name: "Dot the Baker", sprite: "homemaker", map: "square", x: 6, y: 22, wander: 1, voter: true,
+    friends: ["mo", "ada"], hangout: { map: "square", x: 18, y: 22 }, likes: "Fast deliveries (bread goes stale!)" },
+  { id: "pell", name: "Pell the Stationer", sprite: "shopassistant", map: "square", x: 14, y: 12, wander: 1, voter: true,
+    friends: ["mo", "sable", "mayor"], hangout: { map: "square", x: 20, y: 23 }, likes: "Neat, on-time post" },
+  { id: "sable", name: "Sable the Tailor", sprite: "fashionista", map: "square", x: 34, y: 12, wander: 1, voter: true,
+    friends: ["rosa", "pell"], hangout: { map: "square", x: 21, y: 22 }, likes: "A sharp uniform" },
+  { id: "mo", name: "Mo", sprite: "shopkeeper", map: "square", x: 40, y: 21, wander: 0, voter: true,
+    friends: ["finn", "dot", "pell"], hangout: { map: "square", x: 19, y: 21 }, likes: "Monsters being well fed" },
+  { id: "mayor", name: "Mayor Hollyhock", sprite: "ceo", map: "square", x: 28, y: 20, wander: 3, voter: true,
     friends: ["ada", "pell", "granny"], likes: "Reliability. He's undecided." },
   // Village
   { id: "granny", name: "Granny Marigold", sprite: "granny", map: "village", x: 46, y: 20, wander: 2, voter: true,
-    friends: ["rosa", "captain", "ada"], hangout: { map: "square", x: 15, y: 17 }, likes: "Letters handed over in person" },
+    friends: ["rosa", "captain", "ada"], hangout: { map: "square", x: 20, y: 25 }, likes: "Letters handed over in person" },
   { id: "rosa", name: "Rosa", sprite: "florist", map: "village", x: 52, y: 12, wander: 2, voter: true,
-    friends: ["granny", "finn", "sable"], hangout: { map: "square", x: 15, y: 18 }, likes: "Early mornings and flowers" },
+    friends: ["granny", "finn", "sable"], hangout: { map: "square", x: 22, y: 24 }, likes: "Early mornings and flowers" },
   { id: "ada", name: "Nurse Ada", sprite: "nurse", map: "village", x: 40, y: 28, wander: 2, voter: true,
-    friends: ["granny", "dot", "mayor"], hangout: { map: "square", x: 13, y: 22 }, likes: "Checking in on folks" },
+    friends: ["granny", "dot", "mayor"], hangout: { map: "square", x: 24, y: 24 }, likes: "Checking in on folks" },
   { id: "finn", name: "Finn", sprite: "fisher", map: "village", x: 26, y: 41, wander: 0, voter: true,
-    friends: ["rosa", "mo", "captain"], hangout: { map: "square", x: 23, y: 21 }, likes: "Being left alone (mostly)" },
+    friends: ["rosa", "mo", "captain"], hangout: { map: "square", x: 26, y: 22 }, likes: "Being left alone (mostly)" },
   { id: "shelly", name: "Shelly", sprite: "beachcomber", map: "village", x: 36, y: 36, wander: 3, voter: true,
     friends: ["tobi", "finn"], likes: "Anything the tide brings in" },
   { id: "tobi", name: "Tobi", sprite: "childactor", map: "village", x: 14, y: 12, wander: 3, voter: true,
@@ -219,6 +233,9 @@ export const WILD_MONSTERS: MonsterDef[] = [
   { id: "rocky", name: "Rocky", sprite: "rockitten", map: "village", x: 14, y: 19, ability: "Smash" },
   { id: "bzz", name: "Bzz", sprite: "bee", map: "village", x: 55, y: 8, ability: "Zoom" },
 ];
+
+/** A fresh game opens in the Town Square, outside the boarded-up post office. */
+export const INTRO_START = { map: "square" as MapId, x: 23, y: 13, dir: "up" as FacingDir };
 
 /** Every morning you wake at your cottage door. */
 export const PLAYER_START = { map: "village" as MapId, x: 25, y: 19 };

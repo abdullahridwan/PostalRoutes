@@ -98,10 +98,10 @@ export function buildWorld(map: MapDef): World {
       for (let i = 0; i < 2; i++) {
         covered[y][x + i] = covered[y + 1][x + i] = true;
         // alternate decoration layers so neighbouring trees overlap nicely
-        const layer = (x / 2 + y / 2) % 2 === 0 ? deco1 : deco2;
+        const layer = (Math.floor(x / 2) + Math.floor(y / 2)) % 2 === 0 ? deco1 : deco2;
         layer[y][x + i] = TREE.mid[i];
         layer[y + 1][x + i] = TREE.trunk[i];
-        if (y > 0) above[(y / 2) % 2][y - 1][x + i] = TREE.canopy[i];
+        if (y > 0) above[Math.floor(y / 2) % 2][y - 1][x + i] = TREE.canopy[i];
       }
     }
   }

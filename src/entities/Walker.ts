@@ -33,6 +33,7 @@ export class Walker {
   moving = false;
   key: string;
   bob = 0; // vertical offset (e.g. hovering bee)
+  dead = false; // set on destroy so late tween callbacks do nothing
 
   constructor(public scene: Phaser.Scene, key: string, tx: number, ty: number) {
     this.key = key;
@@ -72,6 +73,7 @@ export class Walker {
   }
 
   idle() {
+    if (this.dead) return;
     this.sprite.anims.stop();
     this.sprite.setFrame(ROW[this.facing] * 3 + 1);
   }
@@ -89,10 +91,12 @@ export class Walker {
       y: this.py - 1 + this.bob,
       duration: ms,
       onUpdate: () => {
+        if (this.dead) return;
         this.shadow.setPosition(this.sprite.x, this.sprite.y - this.bob - 1);
         this.syncDepth();
       },
       onComplete: () => {
+        if (this.dead) return;
         this.moving = false;
         onDone?.();
       },
@@ -115,10 +119,11 @@ export class Walker {
       y: this.py - 1 + this.bob,
       duration: ms,
       onUpdate: () => {
+        if (this.dead) return;
         this.shadow.setPosition(this.sprite.x, this.sprite.y - this.bob - 1);
         this.syncDepth();
       },
-      onComplete: () => { this.moving = false; },
+      onComplete: () => { if (!this.dead) this.moving = false; },
     });
   }
 
@@ -128,6 +133,9 @@ export class Walker {
   }
 
   destroy() {
+    this.dead = true;
+    // stop any in-flight step so its callbacks never touch destroyed objects
+    this.scene.tweens.killTweensOf([this.sprite, this.shadow]);
     this.sprite.destroy();
     this.shadow.destroy();
   }

@@ -11,6 +11,7 @@ export type Msg = {
   name?: string;
   portrait?: string;
   hearts?: number; // shown next to the name tag (0–5)
+  onShow?: () => void; // runs when this line appears (used to move the camera in cutscenes)
   text: string;
   choices?: { label: string; cb: () => void }[];
 };
@@ -70,6 +71,10 @@ export class UI extends Phaser.Scene {
   folkPanel!: Phaser.GameObjects.Container;
   votePill!: Phaser.GameObjects.Container;
   voteText!: Phaser.GameObjects.Text;
+  objPill!: Phaser.GameObjects.Container;
+  objBg!: Phaser.GameObjects.Graphics;
+  objText!: Phaser.GameObjects.Text;
+  objShown = "";
   nameHearts!: Phaser.GameObjects.Container;
   mapPanel!: Phaser.GameObjects.Container;
 
@@ -160,7 +165,7 @@ export class UI extends Phaser.Scene {
     if (this.touch.enabled) {
       // keep the bottom clear for the pad: friends tuck under the HUD, prompt floats above
       this.prompt.setPosition(width / 2, height - this.touch.reservedHeight - 8);
-      this.friendsRow.setPosition(14, 14 + 120 + 10 + 46).setScale(0.8);
+      this.friendsRow.setPosition(14, 14 + 126 + (this.objBg ? Math.max(32, this.objText.height + 14) : 32) + 10 + 46).setScale(0.8);
     } else {
       this.prompt.setPosition(width / 2, height - 18);
       this.friendsRow.setPosition(14, height - 14).setScale(1);
@@ -194,6 +199,13 @@ export class UI extends Phaser.Scene {
     this.voteText = txt(this, 36, 6, "", 15, "#fff4dc");
     this.votePill.add([pg, this.add.image(18, 15, "ballot").setScale(2), this.voteText]);
     this.hud.add(this.votePill);
+
+    // what to do right now
+    this.objPill = this.add.container(0, 126);
+    this.objBg = this.add.graphics();
+    this.objText = txt(this, 34, 7, "", 15, INK, { wordWrap: { width: 170 }, lineSpacing: 2 });
+    this.objPill.add([this.objBg, this.add.text(10, 5, "▶", { fontFamily: FONT, fontSize: "18px", color: "#b0503a" }), this.objText]);
+    this.hud.add(this.objPill);
     this.friendsRow = this.add.container(0, 0).setDepth(100).setVisible(false);
   }
 
@@ -226,6 +238,18 @@ export class UI extends Phaser.Scene {
         this.friendsRow.add([g, spr, n, a]);
       });
     }
+  }
+
+  /** The always-visible "what do I do now" line under the vote tally. */
+  setObjective(text: string) {
+    if (text === this.objShown) return;
+    this.objShown = text;
+    this.objText.setText(text);
+    const h = Math.max(32, this.objText.height + 14);
+    this.objBg.clear();
+    this.objBg.fillStyle(PAPER, 0.96).fillRoundedRect(0, 0, 216, h, 10);
+    this.objBg.lineStyle(2, 0xb0503a, 0.9).strokeRoundedRect(0, 0, 216, h, 10);
+    this.layout();
   }
 
   setPrompt(t: string | null) {
@@ -348,6 +372,7 @@ export class UI extends Phaser.Scene {
       return;
     }
     this.current = m;
+    m.onShow?.();
     this.dialog.setVisible(true);
     this.dialogName.setVisible(!!m.name).setText(m.name ?? "");
     this.nameHearts.removeAll(true);
@@ -566,7 +591,7 @@ export class UI extends Phaser.Scene {
   heartRow(parent: Phaser.GameObjects.Container, x: number, y: number, n: number, scale: number) {
     for (let i = 0; i < 5; i++) {
       const h = this.add.image(x + i * 8 * scale, y, "heart").setScale(scale).setOrigin(0, 0.5);
-      if (i >= n) h.setTint(0x5a4a4a).setAlpha(0.45);
+      if (i >= n) h.setTint(0xb8aca0).setAlpha(0.85);
       parent.add(h);
     }
   }

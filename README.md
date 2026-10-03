@@ -38,7 +38,7 @@ Your grandma Marlo ran the Seabreeze Post Office for forty years and left it to 
 - **Morning:** walk up the North Road to the **Town Square** and collect the mailbag from Postmaster Gull. Folks who don't trust you yet send some of their mail with Swiftline instead.
 - **Deliver:** red mailboxes, or hand letters over in person. Arrows point to every stop, including the road to the other map.
 - **Get paid:** your cut of the postage plus tips. Tips grow with trust; quick "speedy" deliveries earn more.
-- **Race the drones:** Swiftline drones fly from the depot to someone's mailbox. Get there first or lose the delivery (and a little trust).
+- **Drones are real:** Swiftline drones buzz around the Town Square from the start. From day 2 they also launch from the depot to deliver someone's letter. Beat them to the mailbox or lose the delivery (and a little trust).
 - **Trust → votes:** every villager has hidden trust shown as hearts. 3 hearts = they vote for you. You need 7 of 12.
 - **Gossip:** at midday villagers gather in the square and talk about what you did; their friends warm (or cool) to you too.
 - **Evening:** when the bag is empty the sun sets. Go home, choose how much pay goes into the **Repair Fund**, and sleep. Repairs pull boards off the post office and unlock perks (bigger bag, a bike, and a secret in the old sorting room).

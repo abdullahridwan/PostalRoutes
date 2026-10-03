@@ -11,7 +11,7 @@ import {
 import { addTrust, gossipBetween, hearGossip, hearts, logEvent, overnightGossip, tier, voteTally } from "../game/trust";
 import { buildWorld, type World as WorldData } from "../world/build";
 import {
-  MAPS, PLAYER_START, VILLAGERS, WILD_MONSTERS, homeOf, type MapDef, type MapId, type VillagerDef,
+  INTRO_START, MAPS, PLAYER_START, VILLAGERS, WILD_MONSTERS, homeOf, type MapDef, type MapId, type VillagerDef,
 } from "../world/layout";
 import { FOUNTAIN, TILESETS, WATER_FRAMES } from "../world/tiles";
 import type { MapInfo, Msg, UI } from "./UI";
@@ -78,6 +78,7 @@ export class World extends Phaser.Scene {
   lastDeliveryAt = 0;
   lastGossipAt = 0;
   pendingNews: Msg[] = [];
+  ambient: { sprite: Phaser.GameObjects.Image; shadow: Phaser.GameObjects.Ellipse; cx: number; cy: number; rx: number; ry: number; speed: number; phase: number }[] = [];
 
   constructor() { super("World"); }
 
@@ -87,6 +88,7 @@ export class World extends Phaser.Scene {
     this.villagers = new Map();
     this.wild = new Map();
     this.drones = [];
+    this.ambient = [];
     this.mode = "title";
   }
 
@@ -110,11 +112,14 @@ export class World extends Phaser.Scene {
     this.events.once("shutdown", () => this.scale.off("resize", this.applyZoom, this));
 
     // player + monster friends persist across maps
+    const first = !this.state.introSeen;
     this.player = new Walker(this, this.walkSprite(), PLAYER_START.x, PLAYER_START.y);
     this.player.face("down");
     for (const id of this.state.friends) this.addFollower(id);
 
-    this.loadMap(PLAYER_START.map, { x: PLAYER_START.x, y: PLAYER_START.y, dir: "down" });
+    // a brand-new game opens in the Town Square; returning players wake at their cottage
+    if (first) this.loadMap(INTRO_START.map, { x: INTRO_START.x, y: INTRO_START.y, dir: INTRO_START.dir });
+    else this.loadMap(PLAYER_START.map, { x: PLAYER_START.x, y: PLAYER_START.y, dir: "down" });
 
     this.time.addEvent({ delay: 280, loop: true, callback: () => this.animateWater() });
     this.time.addEvent({ delay: 220, loop: true, callback: () => this.animateFountain() });
@@ -122,7 +127,7 @@ export class World extends Phaser.Scene {
     this.time.addEvent({ delay: 1600, loop: true, callback: () => this.wanderTick() });
     this.time.addEvent({ delay: 2500, loop: true, callback: () => this.gossipTick() });
 
-    this.cameras.main.centerOn(36 * TILE, 30 * TILE);
+    this.cameras.main.centerOn((this.mapDef.W / 2) * TILE, (this.mapDef.H / 2) * TILE);
     let autostart = false;
     try {
       autostart = sessionStorage.getItem("postal-autostart") === "1";
@@ -209,6 +214,8 @@ export class World extends Phaser.Scene {
       this.wild.set(m.id, w);
       this.tweens.add({ targets: w.sprite, y: w.sprite.y - 3, yoyo: true, repeat: -1, duration: 500, ease: "Sine.inOut" });
     }
+
+    this.spawnAmbientDrones();
 
     // player + followers
     this.player.tx = spawn.x;
@@ -365,35 +372,88 @@ export class World extends Phaser.Scene {
     this.cameras.main.startFollow(this.player.sprite, true, 0.15, 0.15, 0, 8);
     this.ui.setWeather(weatherFor(this.state.day));
     this.refresh();
-    if (!this.state.introSeen) {
-      this.state.introSeen = true;
-      const grandma: Letter = {
-        id: "grandma", to: "you", from: "Grandma Marlo",
-        title: "If You're Reading This…",
-        body: "My dear, the Seabreeze Post Office is yours now. I ran it for forty years.\nIt's broke, it's boarded up, and a company called Swiftline wants to tear it down.\nDon't let them. Deliver the mail. Get to know everyone. Win them back, one letter at a time.\nPip will help. He knows the way. — Gran",
-      };
-      this.ui.showLetter(grandma, "You", () => {
+    if (!this.state.introSeen) this.introCutscene();
+    else this.ui.toast(`Day ${this.state.day}`);
+  }
+
+  /** Move the camera to look at a spot, used while characters explain the premise. */
+  look(tx: number, ty: number) {
+    const cam = this.cameras.main;
+    cam.stopFollow();
+    cam.pan(tx * TILE + 8, ty * TILE + 8, 1100, "Sine.easeInOut");
+  }
+
+  /**
+   * First minutes of the game: grandma's letter, then Postmaster Gull walks you through
+   * what's at stake, who the villain is, and exactly what to do.
+   */
+  introCutscene() {
+    const s = this.state;
+    s.introSeen = true;
+    s.metVane = true;
+    this.mode = "cutscene";
+    const post = this.mapDef.buildings.find((b) => b.id === "post")!;
+    const depot = this.mapDef.buildings.find((b) => b.id === "depot")!;
+    const g = { name: "Postmaster Gull", portrait: "professor" };
+    const vane = { name: "Director Vane", portrait: "magician" };
+    const gull = this.villagers.get("gull")!;
+    gull.w.tx = this.player.tx + 1;
+    gull.w.ty = this.player.ty - 1;
+    gull.w.place();
+    gull.w.face("down");
+    this.player.face("up");
+
+    const letter: Letter = {
+      id: "grandma", to: "you", from: "Grandma Marlo",
+      title: "If You're Reading This…",
+      body: "My dear, the Seabreeze Post Office is yours now. I ran it for forty years.\nIt's broke, it's boarded up, and a company called Swiftline wants to tear it down.\nDon't let them. Deliver the mail. Get to know everyone. Win them back, one letter at a time.\nGull will explain. Pip knows the way. — Gran",
+    };
+    this.ui.showLetter(letter, "You", () => {
+      this.say([
+        { text: "You step into the Town Square of Seabreeze. The Post Office stands in front of you… boarded up.", onShow: () => this.look(post.x + 2, post.y + 2) },
+        { ...g, text: "There you are. Marlo's grandchild. I'm Gull, her postmaster, and the last person on this staff.", onShow: () => this.look(gull.w.tx, gull.w.ty) },
+        { ...g, text: "Your grandmother ran this post office for forty years. When she passed, nobody could keep it running. The town stopped writing. The roof started to leak." },
+        { ...g, text: "And then Swiftline Logistics moved in. Look over there.", onShow: () => this.look(depot.x + 2, depot.y + 1) },
+        { text: "A grey warehouse hums on the edge of the square. Swiftline drones whirr in and out, carrying parcels overhead." },
+        { ...vane, text: "Director Hollis Vane, Swiftline Logistics. Nothing personal, courier. Efficiency is just… kinder.", onShow: () => { const v = this.villagers.get("vane"); if (v) this.look(v.w.tx, v.w.ty); } },
+        { ...vane, text: "In twenty days the Council votes on my offer: this post office comes down, and a drone hub goes up. Do enjoy your little route while it lasts." },
+        { ...g, text: "He means it. Seven of the twelve Council members have to vote to keep us. Right now? Nobody does.", onShow: () => this.look(post.x - 1, post.y + 4) },
+        { ...g, text: "So here's how we win. You deliver the mail: quickly, in person when you can, with a smile. Every villager has hearts for you. Three hearts, and that's a vote for the post office.", onShow: () => this.look(gull.w.tx, gull.w.ty) },
+        { ...g, text: "You get a cut of the postage plus tips, and the better they like you, the bigger the tip. Each night, put some of it into the Repair Fund. Fix the post office board by board." },
+        { ...g, text: "Watch out for the drones: they race you to people's mailboxes, and Swiftline mail sticks to a mailbox like a sticker. Beat them there, and the town notices." },
+        { ...g, text: "Here's your first mailbag, three letters. Your goal is always in the corner of the screen. Go on!" },
+      ], () => {
+        const { fresh } = packBag(s);
+        s.pickedUpAt = Date.now();
+        this.lastDeliveryAt = Date.now();
+        sfx.open();
+        this.mode = "play";
+        this.cameras.main.panEffect.reset(); // end any pan still gliding so follow takes over
+        this.cameras.main.startFollow(this.player.sprite, true, 0.15, 0.15, 0, 8);
+        this.refresh();
         this.say([
-          { name: "Pip", text: "Pweep! ♪ (Pip tugs your sleeve toward the north road.)" },
-          { text: "The Post Office is in the Town Square, up the North Road. Postmaster Gull is waiting with your first mailbag." },
+          { text: `You got the mailbag! (${fresh.length} letters.) TAB shows who they're for. Arrows at the edge of the screen point the way.` },
           { text: "Arrows / WASD to walk · E to talk & deliver · TAB mailbag · M map · T townsfolk · N mute." },
-        ]);
+        ], () => save(s));
       });
-    } else {
-      this.ui.toast(`Day ${this.state.day}`);
-    }
+    });
   }
 
   // ── Main loop ───────────────────────────────────────────────
   update(_t: number, _dt: number) {
     if (this.mode === "title") {
       this.titlePan += 0.002;
-      this.cameras.main.centerOn((32 + Math.sin(this.titlePan) * 14) * TILE, (30 + Math.cos(this.titlePan * 0.7) * 4) * TILE);
+      this.cameras.main.centerOn(
+        (this.mapDef.W / 2 + Math.sin(this.titlePan) * (this.mapDef.W / 4)) * TILE,
+        (this.mapDef.H / 2 + Math.cos(this.titlePan * 0.7) * (this.mapDef.H / 8)) * TILE,
+      );
       this.updateNight();
       return;
     }
     this.updateDrones();
+    this.updateAmbientDrones();
     this.updateNight();
+    this.ui.setObjective(this.objective());
     this.ui.updateHud(this.state, this.friendsInfo());
     if (this.mode !== "play") {
       this.ui.setPrompt(null);
@@ -976,7 +1036,44 @@ export class World extends Phaser.Scene {
     ], next);
   }
 
+  /** The single line in the corner telling the player what to do right now. */
+  objective(): string {
+    const s = this.state;
+    if (s.voteWon) return "The post office is saved! Keep delivering, and keep making friends.";
+    if (!s.pickedUp) return this.mapId === "square" ? "Pick up today's mail from Postmaster Gull, by the post office." : "Walk up the North Road to the Town Square to collect today's mail.";
+    if (s.bag.length) return `Deliver the mail: ${s.bag.length} ${s.bag.length === 1 ? "letter" : "letters"} left. Beat the drones, win hearts.`;
+    return s.repairs < REPAIRS.length ? "All delivered! Go home (your cottage, in the village) to fund repairs and sleep." : "All delivered! Go home and sleep.";
+  }
+
   // ── Swiftline drones ────────────────────────────────────────
+  /** Swiftline drones are always buzzing around the square: they're really there. */
+  spawnAmbientDrones() {
+    this.ambient = [];
+    if (this.mapId !== "square" || this.state.vaneSoftened || this.state.voteWon) return;
+    const defs = [
+      { cx: 40, cy: 22, rx: 4, ry: 2, speed: 0.0007, phase: 0 },
+      { cx: 25, cy: 21, rx: 10, ry: 3, speed: 0.00035, phase: 2 },
+      { cx: 16, cy: 12, rx: 6, ry: 2, speed: 0.0005, phase: 4 },
+    ];
+    for (const d of defs) {
+      const shadow = this.track(this.add.ellipse(0, 0, 12, 4, 0x000000, 0.22).setDepth(9));
+      const sprite = this.track(this.add.image(0, 0, "drone").setDepth(4400).setScale(1.5));
+      this.ambient.push({ sprite, shadow, ...d });
+    }
+  }
+
+  updateAmbientDrones() {
+    const t = this.time.now;
+    for (const d of this.ambient) {
+      if (!d.sprite.active) continue;
+      const a = t * d.speed + d.phase;
+      const x = (d.cx + Math.cos(a) * d.rx) * TILE + 8;
+      const y = (d.cy + Math.sin(a) * d.ry) * TILE;
+      d.sprite.setPosition(x, y + Math.sin(t / 160 + d.phase) * 2).setFlipX(-Math.sin(a) * d.rx > 0);
+      d.shadow.setPosition(x, y + 22);
+    }
+  }
+
   scheduleDrones() {
     const s = this.state;
     if (s.day < 2 || s.vaneSoftened || s.voteWon) return;
@@ -1048,7 +1145,7 @@ export class World extends Phaser.Scene {
       const y = (d.from.y + (d.dest.y - d.from.y) * p) * TILE + 8;
       if (!d.sprite) {
         d.shadow = this.add.ellipse(x, y + 18, 12, 4, 0x000000, 0.25).setDepth(9);
-        d.sprite = this.add.image(x, y, "drone").setDepth(4400);
+        d.sprite = this.add.image(x, y, "drone").setDepth(4400).setScale(1.5);
       }
       d.sprite.setPosition(x, y + Math.sin(now / 180) * 2).setFlipX(d.dest.x < d.from.x);
       d.shadow!.setPosition(x, y + 18);
