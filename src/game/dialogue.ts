@@ -2,7 +2,7 @@
 
 export const CHATTER: Record<string, [string[], string[], string[]]> = {
   gull: [
-    ["Mail doesn't deliver itself! Well. It does now. You're it.", "Win them over one letter at a time. Hearts become votes, votes save the post office."],
+    ["Mail doesn't deliver itself! Well. It does now. You're it.", "Win them over one letter at a time. Three hearts, and they're a friend of the post office."],
     ["Fine work, courier. The bay hasn't been this chatty in years."],
     ["You know, I was a courier once. Then I took a seagull to the knee."],
   ],
@@ -42,7 +42,7 @@ export const CHATTER: Record<string, [string[], string[], string[]]> = {
     ["Tea went well. I wore a tie. Don't tell anyone. Tell everyone."],
   ],
   captain: [
-    ["Ahoy! A swimmer! Haven't had a visitor since… well. Ever."],
+    ["Ahoy! A visitor! Haven't had one since… well. Ever."],
     ["Forty years keeping a light that won't light. Stubborn, like me."],
     ["There's a glow on the shore at night. Like flowers. Can't be, surely."],
   ],
@@ -61,17 +61,17 @@ Object.assign(CHATTER, {
     ["My father would have liked you. He loved this post office."],
   ],
   sable: [
-    ["That uniform is a crime against fabric, darling.", "Swiftline drones don't wear anything. Very minimalist. I hate it."],
-    ["Better! You walk like someone people trust now.", "Fancy a new colour? I do house calls. Well, shop calls."],
-    ["You've made this town stylish again. Marlo would be thrilled."],
+    ["That walk is a crime against bicycles, courier.", "Swiftline drones don't even have wheels. Tragic."],
+    ["Better! You ride like someone people trust now.", "Fancy a faster bike? I do house calls. Well, shop calls."],
+    ["You've made this town cycle-friendly again. Marlo would be thrilled."],
   ],
   mayor: [
-    ["Swiftline's offer is very generous. Very… efficient. I haven't decided.", "The Council votes soon. Make your case, courier. With deliveries."],
+    ["Swiftline's offer is very generous. Very… efficient. I haven't decided.", "The town is watching how you do. Make your case, courier. With deliveries."],
     ["People keep telling me about you. Good things, mostly.", "A town is just people who write to each other. Someone said that once."],
     ["Between us? I'm voting for the post office. Don't tell Vane."],
   ],
   vane: [
-    ["Director Hollis Vane, Swiftline Logistics. Nothing personal. Efficiency is just… kinder.", "My drones don't get tired, lost, or sentimental. Can you say the same?", "Twenty days, courier. Then this square gets a proper hub."],
+    ["Director Hollis Vane, Swiftline Logistics. Nothing personal. Efficiency is just… kinder.", "My drones don't get tired, lost, or sentimental. Can you say the same?", "Every drone I send out is a letter you didn't."],
     ["You're more stubborn than the numbers said you'd be.", "This town loves its little rituals. Rituals don't scale."],
     ["I grew up here, you know. I left the day the mail stopped coming."],
   ],

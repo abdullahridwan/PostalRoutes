@@ -2,7 +2,10 @@ import Phaser from "phaser";
 import { sfx } from "../game/audio";
 import type { Letter } from "../game/letters";
 import { clockText, letterById, type GameState } from "../game/state";
-import { hearts, tier, voteTally, voters } from "../game/trust";
+import { friendCount, hearts, tier, voters } from "../game/trust";
+import { ITEMS } from "../game/items";
+import { calendar, save, type GameState as GS } from "../game/state";
+import { isMuted, toggleMute } from "../game/audio";
 import { ALL_BUILDINGS as BUILDINGS, VILLAGERS } from "../world/layout";
 import { TouchControls } from "./TouchControls";
 import type { World } from "./World";
@@ -41,7 +44,7 @@ const SHORT_LABELS: Record<string, string> = {
   shelly: "Shelly", rosa: "Rosa", tobi: "Tobi", finn: "Finn", captain: "Captain",
 };
 
-type FriendInfo = { id: string; name: string; sprite: string; ability: string; locked: boolean };
+type HelperCard = { name: string; sprite: string; perk: string } | null;
 
 export class UI extends Phaser.Scene {
   queue: Msg[] = [];
@@ -185,19 +188,19 @@ export class UI extends Phaser.Scene {
     this.hudClock = txt(this, 204, 8, "", 18, "#b0503a").setOrigin(1, 0);
     const coin = this.add.image(20, 51, "coin").setScale(2);
     this.hudCoins = txt(this, 32, 40, "", 17);
-    const snack = this.add.image(92, 51, "snack").setScale(2);
+    const snack = this.add.image(92, 51, "i_treat").setScale(2);
     this.hudSnacks = txt(this, 104, 40, "", 17);
     const env = this.add.image(154, 51, "envelope").setScale(2);
     this.hudBag = txt(this, 170, 40, "", 17);
     this.hud.add([g, this.hudDay, this.hudClock, coin, this.hudCoins, snack, this.hudSnacks, env, this.hudBag]);
 
-    // the big goal, always visible: Council votes
+    // always visible: how many friends you have, and how far Swiftline has spread
     this.votePill = this.add.container(0, 88);
     const pg = this.add.graphics();
     pg.fillStyle(NAVY, 0.88).fillRoundedRect(0, 0, 216, 30, 15);
     pg.lineStyle(2, 0xffe066, 0.8).strokeRoundedRect(0, 0, 216, 30, 15);
-    this.voteText = txt(this, 36, 6, "", 15, "#fff4dc");
-    this.votePill.add([pg, this.add.image(18, 15, "ballot").setScale(2), this.voteText]);
+    this.voteText = txt(this, 34, 6, "", 14, "#fff4dc");
+    this.votePill.add([pg, this.add.image(18, 15, "heart").setScale(2), this.voteText]);
     this.hud.add(this.votePill);
 
     // what to do right now
@@ -209,38 +212,42 @@ export class UI extends Phaser.Scene {
     this.friendsRow = this.add.container(0, 0).setDepth(100).setVisible(false);
   }
 
-  updateHud(s: GameState, friends: FriendInfo[]) {
+  updateHud(s: GameState, helper: HelperCard) {
     this.hud.setVisible(true);
     this.friendsRow.setVisible(true);
     const w = this.registry.get("weather") ?? "sunny";
     const label = w === "rain" ? "Rainy" : w === "breezy" ? "Breezy" : "Sunny";
-    this.hudDay.setText(`Day ${s.day} · ${label}`);
+    const c = calendar(s.day);
+    this.hudDay.setText(`${c.season} ${c.dayOfSeason} ${label === "Rainy" ? "☂" : label === "Breezy" ? "≈" : "☀"}`);
     this.hudClock.setText(clockText(s.minutes));
     this.hudCoins.setText(`${s.coins}`);
-    this.hudSnacks.setText(`${s.snacks}`);
+    this.hudSnacks.setText(`${Object.values(s.inv).reduce((a, b) => a + b, 0)}`);
     this.hudBag.setText(`${s.bag.length}`);
-    const tally = voteTally(s);
-    const left = Math.max(0, s.voteDay - s.day);
-    this.voteText.setText(s.voteWon ? "Post office saved! ♥" : `Votes ${tally.forYou}/${tally.needed} · ${left === 0 ? "vote today" : `${left} days left`}`);
+    const f = friendCount(s);
+    this.voteText.setText(`${f.forYou}/${f.total} friends · Swiftline ${Math.round(s.share)}%`);
+    this.voteText.setFontSize(13);
 
-    this.touch.showRun = friends.some((f) => f.id === "bzz");
-    const key = friends.map((f) => f.id + f.locked).join();
+    // today's helper, shown as one card
+    const key = helper ? helper.name : "none";
     if (key !== this.friendsKey) {
       this.friendsKey = key;
       this.friendsRow.removeAll(true);
-      friends.forEach((f, i) => {
-        const x = i * 120;
+      if (helper) {
         const g = this.add.graphics();
-        g.fillStyle(NAVY, 0.8).fillRoundedRect(x, -48, 112, 48, 10);
-        const spr = this.add.sprite(x + 22, -6, f.sprite, 1).setOrigin(0.5, 1).setScale(1.5);
-        const n = txt(this, x + 40, -45, f.name, 16, "#fff4dc");
-        const a = txt(this, x + 40, -24, f.locked ? "Swim: ?" : f.ability, 14, f.locked ? "#8899aa" : "#ffe066");
+        g.fillStyle(NAVY, 0.85).fillRoundedRect(0, -52, 190, 52, 10);
+        const spr = this.add.sprite(26, -8, helper.sprite, 1).setOrigin(0.5, 1).setScale(1.6);
+        const n = txt(this, 52, -48, helper.name, 17, "#fff4dc");
+        const a = txt(this, 52, -26, helper.perk, 13, "#ffe066", { wordWrap: { width: 130 } });
         this.friendsRow.add([g, spr, n, a]);
-      });
+      } else {
+        const g = this.add.graphics();
+        g.fillStyle(NAVY, 0.6).fillRoundedRect(0, -34, 190, 34, 10);
+        this.friendsRow.add([g, txt(this, 12, -29, "No helper today (Helper Board)", 12, "#9aabbc")]);
+      }
     }
   }
 
-  /** The always-visible "what do I do now" line under the vote tally. */
+  /** The always-visible "what do I do now" line under the friends tally. */
   setObjective(text: string) {
     if (text === this.objShown) return;
     this.objShown = text;
@@ -431,6 +438,12 @@ export class UI extends Phaser.Scene {
   }
 
   moveChoice(d: number) {
+    if (this.pauseOpen) {
+      this.pauseIndex = (this.pauseIndex + d + this.pauseButtons.length) % this.pauseButtons.length;
+      this.paintPause();
+      sfx.blip();
+      return;
+    }
     if (this.title) {
       this.titleIndex = (this.titleIndex + d + this.titleChoices.length) % this.titleChoices.length;
       this.paintTitle();
@@ -444,12 +457,13 @@ export class UI extends Phaser.Scene {
   }
 
   isBusy() {
-    return !!this.current || this.letterOpen || this.bagOpen || this.mapOpen || this.folkOpen || !!this.title;
+    return !!this.current || this.letterOpen || this.bagOpen || this.mapOpen || this.folkOpen || this.pauseOpen || this.journalOpen || !!this.title;
   }
 
   advance() {
     if (this.letterOpen) return this.closeLetter();
     if (this.bagOpen) return this.toggleBag();
+    if (this.journalOpen) return this.toggleJournal();
     if (this.folkOpen) return this.toggleFolk();
     if (this.mapOpen) return this.toggleMap();
     const m = this.current;
@@ -620,9 +634,9 @@ export class UI extends Phaser.Scene {
     g.fillStyle(PAPER_EDGE, 1).fillRoundedRect(-w / 2, -h / 2, w, h, 16);
     g.fillStyle(PAPER, 1).fillRoundedRect(-w / 2 + 8, -h / 2 + 8, w - 16, h - 16, 12);
     p.add(g);
-    const tally = voteTally(s);
+    const tally = friendCount(s);
     p.add(txt(this, 0, -h / 2 + 20, "Townsfolk", compact ? 22 : 26, "#b0503a").setOrigin(0.5, 0));
-    p.add(txt(this, 0, -h / 2 + (compact ? 50 : 56), `Council votes for you: ${tally.forYou} / ${tally.needed} needed  ·  3 hearts = a vote`, compact ? 12 : 15, "#8a6a4a").setOrigin(0.5, 0));
+    p.add(txt(this, 0, -h / 2 + (compact ? 50 : 56), `Friends: ${tally.forYou} of ${tally.total}  ·  3 hearts = a friend`, compact ? 12 : 15, "#8a6a4a").setOrigin(0.5, 0));
     const colW = (w - 40) / cols;
     list.forEach((v, i) => {
       const t = s.trust[v.id] ?? 0;
@@ -633,7 +647,7 @@ export class UI extends Phaser.Scene {
       p.add(this.add.sprite(x + 20, y + rowH - 12, v.sprite, 1).setOrigin(0.5, 1).setScale(compact ? 1.2 : 1.4));
       p.add(txt(this, x + 42, y + 4, v.name, compact ? 14 : 16));
       this.heartRow(p, x + 42, y + (compact ? 30 : 34), hearts(t), compact ? 1.5 : 1.8);
-      p.add(txt(this, x + (compact ? 120 : 140), y + (compact ? 22 : 26), `${tier(t).name}${votes ? "  ✓ vote" : ""}${compact ? "" : `  ·  ${v.likes ?? ""}`}`, compact ? 11 : 13, votes ? "#2e7d32" : "#8a6a4a",
+      p.add(txt(this, x + (compact ? 120 : 140), y + (compact ? 22 : 26), `${tier(t).name}${votes ? "  ✓ friend" : ""}${compact ? "" : `  ·  ${v.likes ?? ""}`}`, compact ? 11 : 13, votes ? "#2e7d32" : "#8a6a4a",
         { fixedWidth: colW - (compact ? 130 : 152) }));
     });
     p.add(txt(this, 0, h / 2 - 26, "T / tap to close", 14, "#8a6a4a").setOrigin(0.5, 0));
@@ -728,6 +742,7 @@ export class UI extends Phaser.Scene {
   }
 
   titleSelect() {
+    if (this.pauseOpen) { this.pauseSelect(); return; }
     if (!this.title) return;
     const act = this.titleActions[this.titleIndex];
     sfx.open();
@@ -744,16 +759,29 @@ export class UI extends Phaser.Scene {
   }
 
   // ── Weather ────────────────────────────────────────────────
+  indoors = false;
+  night = 0;
+  weatherKind: "sunny" | "breezy" | "rain" = "sunny";
+
+  setIndoors(v: boolean) {
+    this.indoors = v;
+    this.rain?.setVisible(!v);
+    this.petals?.setVisible(!v);
+  }
+  setNight(n: number) { this.night = n; }
+
   setWeather(w: "sunny" | "breezy" | "rain") {
     this.registry.set("weather", w);
+    this.weatherKind = w;
     this.rain?.destroy();
     this.petals?.destroy();
     this.rain = this.petals = undefined;
     const { width, height } = this.scale;
     if (w === "rain") {
-      this.rain = this.add.particles(0, -10, "raindrop", {
-        x: { min: -100, max: width + 100 }, lifespan: 900, speedY: { min: 520, max: 680 }, speedX: -120,
-        scaleY: { min: 2, max: 3.5 }, scaleX: 2, alpha: 0.55, quantity: 4, frequency: 16,
+      // drops start anywhere on the screen (not just the top) so tall windows are fully covered
+      this.rain = this.add.particles(0, 0, "raindrop", {
+        x: { min: -100, max: width + 100 }, y: { min: -40, max: height }, lifespan: 600, speedY: { min: 520, max: 680 }, speedX: -120,
+        scaleY: { min: 2, max: 3.5 }, scaleX: 2, alpha: 0.8, quantity: 8, frequency: 16,
       }).setDepth(50);
     } else if (w === "breezy") {
       this.petals = this.add.particles(-20, 0, "heart", {
@@ -761,6 +789,108 @@ export class UI extends Phaser.Scene {
         rotate: { min: 0, max: 360 }, scale: { min: 1, max: 1.8 }, alpha: 0.55, frequency: 700, tint: [0xffc0cb, 0xfff4dc, 0xffe066],
       }).setDepth(50);
     }
+    this.setIndoors(this.indoors);
+  }
+
+  // ── Pause menu ──────────────────────────────────────────────
+  pauseOpen = false;
+  pausePanel!: Phaser.GameObjects.Container;
+  pauseButtons: Phaser.GameObjects.Text[] = [];
+  pauseIndex = 0;
+  pauseActions: (() => void)[] = [];
+  journalOpen = false;
+  journalPanel!: Phaser.GameObjects.Container;
+
+  togglePause() {
+    if (this.pauseOpen) {
+      this.pauseOpen = false;
+      this.pausePanel?.destroy();
+      sfx.blip();
+      return;
+    }
+    if (this.current || this.letterOpen || this.bagOpen || this.mapOpen || this.folkOpen || this.journalOpen || this.title) return;
+    const w = this.world();
+    const { width, height } = this.scale;
+    this.pauseOpen = true;
+    const p = (this.pausePanel = this.add.container(width / 2, height / 2).setDepth(700));
+    const items: [string, () => void][] = [
+      ["Resume", () => this.togglePause()],
+      ["Journal", () => { this.togglePause(); this.toggleJournal(w.state); }],
+      ["Mailbag", () => { this.togglePause(); this.toggleBag(w.state); }],
+      ["Map", () => { this.togglePause(); this.toggleMap(w.mapInfo()); }],
+      ["Townsfolk", () => { this.togglePause(); this.toggleFolk(w.state); }],
+      [`Sound: ${isMuted() ? "off" : "on"}`, () => { toggleMute(); this.togglePause(); this.togglePause(); }],
+      ["Save game", () => { save(w.state); this.toast("Game saved"); }],
+    ];
+    const h = 120 + items.length * 46, bw = 280;
+    const g = this.add.graphics();
+    g.fillStyle(0x0b1530, 0.65).fillRect(-width, -height, width * 3, height * 3);
+    g.fillStyle(PAPER_EDGE, 1).fillRoundedRect(-bw / 2 - 10, -h / 2, bw + 20, h, 16);
+    g.fillStyle(PAPER, 1).fillRoundedRect(-bw / 2 - 2, -h / 2 + 8, bw + 4, h - 16, 12);
+    p.add(g);
+    p.add(txt(this, 0, -h / 2 + 22, "Paused", 28, "#b0503a").setOrigin(0.5, 0));
+    this.pauseButtons = [];
+    this.pauseActions = [];
+    items.forEach(([label, fn], i) => {
+      const b = txt(this, 0, -h / 2 + 76 + i * 46, label, 20, INK, { backgroundColor: "#f3e6c8", padding: { x: 18, y: 8 }, fixedWidth: bw - 20, align: "center" })
+        .setOrigin(0.5, 0).setInteractive({ useHandCursor: true });
+      b.on("pointerover", () => { this.pauseIndex = i; this.paintPause(); });
+      b.on("pointerdown", () => { this.pauseIndex = i; fn(); });
+      p.add(b);
+      this.pauseButtons.push(b);
+      this.pauseActions.push(fn);
+    });
+    p.add(txt(this, 0, h / 2 - 30, "Esc to resume", 13, "#8a6a4a").setOrigin(0.5, 0));
+    this.pauseIndex = 0;
+    this.paintPause();
+    sfx.open();
+  }
+
+  paintPause() {
+    this.pauseButtons.forEach((b, i) => b.setBackgroundColor(i === this.pauseIndex ? "#ffe066" : "#f3e6c8"));
+  }
+
+  pauseSelect() {
+    this.pauseActions[this.pauseIndex]?.();
+  }
+
+  // ── Journal: requests, items, helper ────────────────────────
+  toggleJournal(s?: GS) {
+    if (this.journalOpen || !s) {
+      this.journalOpen = false;
+      this.journalPanel?.destroy();
+      sfx.blip();
+      return;
+    }
+    if (this.current || this.letterOpen || this.bagOpen || this.mapOpen || this.folkOpen || this.pauseOpen) return;
+    const { width, height } = this.scale;
+    const compact = width < 560;
+    const w = Math.min(560, width - 24);
+    const reqs = s.requests.filter((r) => r.accepted);
+    const inv = Object.entries(s.inv).filter(([, n]) => n > 0);
+    const lines = [
+      "REQUESTS",
+      ...(reqs.length ? reqs.map((r) => `${r.done ? "✓" : "▶"} ${r.title}`) : ["None taken. Check the bulletin board at the Post Office."]),
+      "",
+      "ITEMS",
+      ...(inv.length ? inv.map(([k, n]) => `${ITEMS[k]?.name ?? k} ×${n}`) : ["Nothing yet. Forage in the orchard and on the beaches."]),
+      "",
+      `Coins: ${s.coins}c   ·   Requests done: ${s.requestsDone}`,
+    ];
+    const p = (this.journalPanel = this.add.container(width / 2, height / 2).setDepth(280));
+    const body = txt(this, 0, 0, lines.join("\n"), compact ? 15 : 17, INK, { wordWrap: { width: w - 50 }, lineSpacing: 5 });
+    const h = Math.min(height - 20, body.height + 110);
+    const g = this.add.graphics();
+    g.fillStyle(0x0b1530, 0.55).fillRect(-width, -height, width * 3, height * 3);
+    g.fillStyle(PAPER_EDGE, 1).fillRoundedRect(-w / 2, -h / 2, w, h, 16);
+    g.fillStyle(PAPER, 1).fillRoundedRect(-w / 2 + 8, -h / 2 + 8, w - 16, h - 16, 12);
+    p.add(g);
+    p.add(txt(this, 0, -h / 2 + 18, "Journal", 24, "#b0503a").setOrigin(0.5, 0));
+    body.setPosition(-w / 2 + 28, -h / 2 + 60);
+    p.add(body);
+    p.add(txt(this, 0, h / 2 - 28, "J / tap to close", 14, "#8a6a4a").setOrigin(0.5, 0));
+    this.journalOpen = true;
+    sfx.open();
   }
 
   // ── Transitions ────────────────────────────────────────────
@@ -796,7 +926,7 @@ export class UI extends Phaser.Scene {
       "✦ Lantern Night ✦",
       "Hundreds of paper lanterns drift up over Seabreeze Bay.",
       "Out on the island, the old lighthouse flickers… and blazes to life.",
-      "The Council voted. The Seabreeze Post Office stays open.",
+      "Seabreeze, end of Spring. The post office is open, and the town is writing again.",
       "Vane watches the lighthouse blink from the pier. He doesn't say anything. He doesn't need to.",
       "On the pier, Granny Marigold and Captain Barnaby share a quiet cup of tea.",
       "Finn wears a tie. Rosa wears a flower crown. Tobi and Shelly count the lanterns (they lose count).",

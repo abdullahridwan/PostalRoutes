@@ -38,8 +38,8 @@ export const SHORE_TILES: Record<number, number> = {
 
 const C = (i: number) => gid("core_city_and_country", i);
 
-/** Cobblestone: a seamless 2x2 pattern, indexed [y % 2][x % 2]. */
-export const COBBLE = [[C(613), C(614)], [C(653), C(654)]];
+/** Grey flagstone paving: a seamless 2x2 pattern, indexed [y % 2][x % 2]. */
+export const STONE = [[C(63), C(63)], [C(63), C(63)]];
 
 /** 3x3 fountain; animation frames sit 3 tiles apart in the sheet. */
 export const FOUNTAIN = {

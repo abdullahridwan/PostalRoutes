@@ -55,6 +55,8 @@ export function audioStream(): MediaStream {
   return dest.stream;
 }
 
+export const isMuted = () => muted;
+
 export function toggleMute() {
   muted = !muted;
   return muted;

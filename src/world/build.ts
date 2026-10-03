@@ -1,11 +1,13 @@
 // Turns the code layout into tile layers + a collision grid.
 import stampsJson from "../data/stamps.json";
+import interiorsJson from "../data/interiors.json";
 import type { MapDef, Terrain } from "./layout";
-import { COBBLE, FLOWERS, FOUNTAIN, GRASS, PATH_TILES, SHORE_TILES, STALL, TREE, WATER_FRAMES, gid } from "./tiles";
+import { STONE, FLOWERS, FOUNTAIN, GRASS, PATH_TILES, SHORE_TILES, STALL, TREE, WATER_FRAMES, gid } from "./tiles";
 
 type StampTile = [string, number] | null;
 type Stamp = { w: number; h: number; layers: { above: boolean; tiles: StampTile[][] }[] };
 const STAMPS = stampsJson as unknown as Record<string, Stamp>;
+export const INTERIORS = interiorsJson as unknown as Record<string, { w: number; h: number; solid: number[][] }>;
 
 export const BELOW_LAYERS = 4; // ground, overlay, deco1, deco2
 export type LayerGrid = number[][]; // gid per cell, 0 = empty
@@ -20,6 +22,8 @@ export type World = {
   water: boolean[][];
   doors: { id: string; x: number; y: number }[];
   mailboxes: { id: string; x: number; y: number }[];
+  /** interiors are pre-rendered images; this is their key */
+  interior?: string;
 };
 
 // The map currently being built (set at the top of buildWorld).
@@ -37,7 +41,7 @@ function at(x: number, y: number): Terrain {
 /** Corner mask for a cell of terrain `t`: a corner counts only if all 4 cells sharing it are `t`. */
 function cornerMask(x: number, y: number, t: Terrain): number {
   // sand paths run flush into the cobbled square
-  const same = (o: Terrain) => o === t || (t === "path" && o === "cobble");
+  const same = (o: Terrain) => o === t || (t === "path" && o === "stone");
   const is = (dx: number, dy: number) => same(at(x + dx, y + dy));
   let m = 0;
   if (is(-1, 0) && is(0, -1) && is(-1, -1)) m |= 1; // NW
@@ -58,6 +62,14 @@ export function buildWorld(map: MapDef): World {
   W = map.W;
   H = map.H;
   terrain = map.terrain;
+  if (map.interior) {
+    const solid = INTERIORS[map.interior].solid.map((row) => row.map((c) => !!c));
+    return {
+      below: [], above: [], waterCells: [], fountainCells: [], solid,
+      water: Array.from({ length: H }, () => Array<boolean>(W).fill(false)),
+      doors: [], mailboxes: [], interior: map.interior,
+    };
+  }
   const below = Array.from({ length: BELOW_LAYERS }, blank);
   const above = [blank(), blank()];
   const solid = Array.from({ length: H }, () => Array<boolean>(W).fill(false));
@@ -77,8 +89,8 @@ export function buildWorld(map: MapDef): World {
         if (m !== 15) overlay[y][x] = SHORE_TILES[m] ?? 0;
         water[y][x] = true;
         solid[y][x] = true;
-      } else if (t === "cobble") {
-        ground[y][x] = COBBLE[y % 2][x % 2];
+      } else if (t === "stone") {
+        ground[y][x] = STONE[y % 2][x % 2];
       } else if (t === "path") {
         ground[y][x] = PATH_TILES[cornerMask(x, y, "path")] ?? PATH_TILES[15];
       } else if (t === "flowers") {
@@ -132,7 +144,11 @@ export function buildWorld(map: MapDef): World {
     }
   }
 
-  for (const b of map.boulders) solid[b.y][b.x] = true;
+  // doors that are warps (the post office) are walkable so you can step inside
+  for (const w of map.warps) {
+    const inside = map.buildings.some((b) => w.x >= b.x && w.x < b.x + STAMPS[b.stamp].w && w.y >= b.y && w.y < b.y + STAMPS[b.stamp].h);
+    if (inside) for (let j = 0; j < w.h; j++) for (let i = 0; i < w.w; i++) solid[w.y + j][w.x + i] = false;
+  }
 
   // 5. Town square props
   const fountainCells: World["fountainCells"] = [];

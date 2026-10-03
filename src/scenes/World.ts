@@ -1,131 +1,122 @@
 import Phaser from "phaser";
 import { DIRS, TILE, Walker, type Dir } from "../entities/Walker";
 import { sfx, startMusic, toggleMute } from "../game/audio";
-import { chatter } from "../game/dialogue";
-import { gossipLines } from "../game/gossip";
-import type { Letter } from "../game/letters";
+import { HELPERS } from "../game/helpers";
 import {
-  BUN_PRICE, DAY_START, DYE_PRICE, EVENING, MINUTES_PER_DELIVERY, REPAIRS, SNACK_PRICE, SWIM_AFTER,
-  clearSave, letterById, load, newGame, packBag, save, weatherFor, type GameState, type MonsterId,
+  BIKES, DAY_END, DAY_START, EVENING, MS_PER_MINUTE, PAINTS, bagSize, calendar, clearSave, has, letterById, load, newGame, save,
+  weatherFor, type GameState,
 } from "../game/state";
-import { addTrust, gossipBetween, hearGossip, hearts, logEvent, overnightGossip, tier, voteTally } from "../game/trust";
+import { overnightGossip, hearts } from "../game/trust";
 import { buildWorld, type World as WorldData } from "../world/build";
 import {
-  INTRO_START, MAPS, PLAYER_START, VILLAGERS, WILD_MONSTERS, homeOf, type MapDef, type MapId, type VillagerDef,
+  BRIDGE_BARRIER, INTRO_START, LIGHTHOUSE, LOCKER_SPOTS, MAPS, PLAYER_START, VILLAGERS, homeOf,
+  type Hotspot, type MapDef, type MapId, type VillagerDef,
 } from "../world/layout";
 import { FOUNTAIN, TILESETS, WATER_FRAMES } from "../world/tiles";
 import type { MapInfo, Msg, UI } from "./UI";
+import * as calendarSys from "../systems/calendar";
+import * as dronesSys from "../systems/drones";
+import * as forageSys from "../systems/forage";
+import * as introSys from "../systems/intro";
+import * as mailSys from "../systems/mail";
+import * as npcSys from "../systems/npcs";
+import * as officeSys from "../systems/office";
+import * as requestSys from "../systems/requests";
+import * as talkSys from "../systems/talk";
 
-const UNIFORMS = [
-  { sprite: "postboy", name: "Classic Blue" },
-  { sprite: "postboy_red", name: "Mailbox Red" },
-  { sprite: "postboy_green", name: "Seaweed Green" },
-  { sprite: "postboy_olive", name: "Driftwood Olive" },
-];
-const WALK_MS = 190;
-const BIKE_MS = 150;
-const ZOOM_MS = 115;
-const SWIM_MS = 230;
-const SPEEDY_MS = 60_000; // a delivery within a minute of the last one counts as "speedy"
-const DRONE_DELAY_MS = 25_000;
-const DRONE_FLIGHT_MS = 50_000;
-
-const MONSTER_INFO: Record<MonsterId, { name: string; sprite: string; ability: string; bob: number }> = {
-  pip: { name: "Pip", sprite: "penguin", ability: "Swim", bob: 0 },
-  rocky: { name: "Rocky", sprite: "rockitten", ability: "Smash", bob: 0 },
-  bzz: { name: "Bzz", sprite: "bee", ability: "Zoom", bob: -6 },
+export type Spot = { map: MapId; x: number; y: number };
+export type Vil = {
+  id: string;
+  def: VillagerDef;
+  where: Spot | null; // null = at home, out of sight
+  w?: Walker; // only exists while on the map you're looking at
+  path: { x: number; y: number }[];
+  leaving: boolean;
+  nextIdle: number;
 };
 
-type Villager = { def: VillagerDef; w: Walker; home: { x: number; y: number } };
-type Spot = { map: MapId; x: number; y: number };
-type Drone = {
-  letterId: string; to: string; map: MapId;
-  from: { x: number; y: number }; dest: { x: number; y: number };
-  launchAt: number; arriveAt: number; announced: boolean; done: boolean;
-  sprite?: Phaser.GameObjects.Image; shadow?: Phaser.GameObjects.Ellipse;
-};
+const PAINT_SPRITES = ["postboy", "postboy_red", "postboy_green", "postboy_olive", "postboy"];
 
 export class World extends Phaser.Scene {
   state!: GameState;
-  mapId: MapId = "village";
+  mapId: MapId = "square";
   mapDef!: MapDef;
   data2!: WorldData;
   ui!: UI;
   player!: Walker;
-  followers: { id: MonsterId; w: Walker }[] = [];
-  trail: { x: number; y: number }[] = [];
-  villagers = new Map<string, Villager>();
-  wild = new Map<MonsterId, Walker>();
-  boulders: Phaser.GameObjects.Image[] = [];
-  mailIcons = new Map<string, Phaser.GameObjects.Image>();
-  stickers = new Map<string, Phaser.GameObjects.Image>();
-  mapObjects: Phaser.GameObjects.GameObject[] = [];
-  tilemap?: Phaser.Tilemaps.Tilemap;
-  groundLayer!: Phaser.Tilemaps.TilemapLayer;
-  decoLayer!: Phaser.Tilemaps.TilemapLayer;
-  nightRect!: Phaser.GameObjects.Rectangle;
-  glows: Phaser.GameObjects.Image[] = [];
-  noticeboard?: { x: number; y: number };
-  drones: Drone[] = [];
+  vils = new Map<string, Vil>();
   mode: "title" | "play" | "cutscene" = "title";
+  playMs = 0; // advances only while you're actually playing (not paused / in dialogue)
   keys!: Record<string, Phaser.Input.Keyboard.Key>;
   cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
-  lastBump = 0;
-  waterFrame = 0;
-  warnedWater = false;
-  titlePan = 0;
+  mapObjects: Phaser.GameObjects.GameObject[] = [];
+  tilemap?: Phaser.Tilemaps.Tilemap;
+  groundLayer?: Phaser.Tilemaps.TilemapLayer;
+  decoLayer?: Phaser.Tilemaps.TilemapLayer;
+  nightRect?: Phaser.GameObjects.Rectangle;
+  glows: Phaser.GameObjects.Image[] = [];
+  mailIcons = new Map<string, Phaser.GameObjects.Image>();
+  stickers = new Map<string, Phaser.GameObjects.Image>();
+  barrier: Phaser.GameObjects.GameObject[] = [];
   playStartedAt = 0;
-  lastDeliveryAt = 0;
+  lastBump = 0;
+  titlePan = 0;
+  waterFrame = 0;
+  fountainFrame = 0;
   lastGossipAt = 0;
+  yawned = false;
   pendingNews: Msg[] = [];
-  ambient: { sprite: Phaser.GameObjects.Image; shadow: Phaser.GameObjects.Ellipse; cx: number; cy: number; rx: number; ry: number; speed: number; phase: number }[] = [];
 
   constructor() { super("World"); }
 
   init() {
-    this.followers = [];
-    this.trail = [];
-    this.villagers = new Map();
-    this.wild = new Map();
-    this.drones = [];
-    this.ambient = [];
+    this.vils = new Map();
+    this.mapObjects = [];
+    this.glows = [];
     this.mode = "title";
+    this.playMs = 0;
+    this.yawned = false;
   }
 
+  // ── Lifecycle ────────────────────────────────────────────────
   create() {
     this.ui = this.scene.get("UI") as UI;
     this.state = load() ?? newGame();
+    this.state.helper = null;
 
     this.cursors = this.input.keyboard!.createCursorKeys();
-    this.keys = this.input.keyboard!.addKeys("W,A,S,D,E,SPACE,ENTER,SHIFT,TAB,Q,M,N,T") as Record<string, Phaser.Input.Keyboard.Key>;
+    this.keys = this.input.keyboard!.addKeys("W,A,S,D,E,SPACE,ENTER,SHIFT,TAB,Q,M,N,T,J,P,ESC") as Record<string, Phaser.Input.Keyboard.Key>;
     this.input.keyboard!.addCapture("TAB,SPACE,UP,DOWN,LEFT,RIGHT");
+    const playOnly = (f: () => void) => () => { if (this.mode === "play" && !this.ui.pauseOpen) f(); };
     this.keys.E.on("down", () => this.onAction());
     this.keys.SPACE.on("down", () => this.onAction());
     this.keys.ENTER.on("down", () => this.onAction());
-    this.keys.TAB.on("down", () => this.mode === "play" && this.ui.toggleBag(this.state));
-    this.keys.Q.on("down", () => this.mode === "play" && this.ui.toggleBag(this.state));
-    this.keys.M.on("down", () => this.mode === "play" && !this.ui.folkOpen && this.ui.toggleMap(this.mapInfo()));
-    this.keys.T.on("down", () => this.mode === "play" && !this.ui.mapOpen && this.ui.toggleFolk(this.state));
+    this.keys.TAB.on("down", playOnly(() => this.ui.toggleBag(this.state)));
+    this.keys.Q.on("down", playOnly(() => this.ui.toggleBag(this.state)));
+    this.keys.M.on("down", playOnly(() => !this.ui.folkOpen && this.ui.toggleMap(this.mapInfo())));
+    this.keys.T.on("down", playOnly(() => !this.ui.mapOpen && this.ui.toggleFolk(this.state)));
+    this.keys.J.on("down", playOnly(() => this.ui.toggleJournal(this.state)));
     this.keys.N.on("down", () => this.ui.toast(toggleMute() ? "Sound off" : "Sound on"));
+    const pause = () => { if (this.mode === "play" || this.ui.pauseOpen) this.ui.togglePause(); };
+    this.keys.ESC.on("down", pause);
+    this.keys.P.on("down", pause);
 
     this.scale.on("resize", this.applyZoom, this);
     this.events.once("shutdown", () => this.scale.off("resize", this.applyZoom, this));
 
-    // player + monster friends persist across maps
-    const first = !this.state.introSeen;
-    this.player = new Walker(this, this.walkSprite(), PLAYER_START.x, PLAYER_START.y);
-    this.player.face("down");
-    for (const id of this.state.friends) this.addFollower(id);
+    this.player = new Walker(this, this.walkSprite(), 0, 0);
+    npcSys.init(this);
+    if (!this.state.requests.length) requestSys.generate(this);
 
-    // a brand-new game opens in the Town Square; returning players wake at their cottage
-    if (first) this.loadMap(INTRO_START.map, { x: INTRO_START.x, y: INTRO_START.y, dir: INTRO_START.dir });
-    else this.loadMap(PLAYER_START.map, { x: PLAYER_START.x, y: PLAYER_START.y, dir: "down" });
+    const first = !this.state.introSeen;
+    const start = first ? INTRO_START : PLAYER_START;
+    this.loadMap(start.map, { x: start.x, y: start.y, dir: start.dir });
 
     this.time.addEvent({ delay: 280, loop: true, callback: () => this.animateWater() });
     this.time.addEvent({ delay: 220, loop: true, callback: () => this.animateFountain() });
     this.time.addEvent({ delay: 400, loop: true, callback: () => this.sparkle() });
-    this.time.addEvent({ delay: 1600, loop: true, callback: () => this.wanderTick() });
-    this.time.addEvent({ delay: 2500, loop: true, callback: () => this.gossipTick() });
+    this.time.addEvent({ delay: 650, loop: true, callback: () => this.mode === "play" && !this.ui.isBusy() && npcSys.tick(this) });
+    this.time.addEvent({ delay: 2500, loop: true, callback: () => talkSys.gossipTick(this) });
 
     this.cameras.main.centerOn((this.mapDef.W / 2) * TILE, (this.mapDef.H / 2) * TILE);
     let autostart = false;
@@ -137,48 +128,121 @@ export class World extends Phaser.Scene {
     else this.ui.showTitle(!!load(), () => this.startGame(false), () => this.startGame(true));
   }
 
-  // ── Maps ────────────────────────────────────────────────────
+  startGame(continueGame: boolean) {
+    if (!continueGame && load()) {
+      clearSave();
+      try { sessionStorage.setItem("postal-autostart", "1"); } catch { /* ignore */ }
+      location.reload();
+      return;
+    }
+    this.beginPlay();
+  }
+
+  beginPlay() {
+    this.mode = "play";
+    this.playStartedAt = this.time.now;
+    startMusic();
+    this.follow();
+    this.ui.setWeather(weatherFor(this.state.day));
+    this.ui.setIndoors(!!this.mapDef.interior);
+    this.refresh();
+    if (!this.state.introSeen) introSys.run(this);
+    else {
+      this.ui.toast(this.dateLine());
+      calendarSys.morning(this, false);
+    }
+  }
+
+  follow() {
+    const cam = this.cameras.main;
+    cam.panEffect.reset();
+    if (this.mapDef.interior) {
+      // small rooms sit centred on screen instead of scrolling
+      cam.stopFollow();
+      cam.centerOn((this.mapDef.W * TILE) / 2, (this.mapDef.H * TILE) / 2);
+      return;
+    }
+    cam.startFollow(this.player.sprite, true, 0.15, 0.15, 0, 8);
+  }
+
+  dateLine() {
+    const c = calendar(this.state.day);
+    return `${c.season} ${c.dayOfSeason} (${c.weekday}) · Year ${c.year}`;
+  }
+
+  // ── Maps ─────────────────────────────────────────────────────
   applyZoom() {
     const { width, height } = this.scale;
+    const cam = this.cameras.main;
+    if (this.mapDef?.interior) {
+      // small rooms get their own centred viewport instead of scrolling around
+      const z = Math.max(2, Math.min(5, Math.floor(Math.min(width / (this.mapDef.W * TILE), height / (this.mapDef.H * TILE)))));
+      const vw = this.mapDef.W * TILE * z, vh = this.mapDef.H * TILE * z;
+      cam.setSize(vw, vh);
+      cam.setPosition((width - vw) / 2, (height - vh) / 2);
+      cam.setZoom(z);
+      return;
+    }
+    cam.setSize(width, height);
+    cam.setPosition(0, 0);
     const z = Math.max(2, Math.floor(Math.min(width / (TILE * 24), height / (TILE * 14))));
-    this.cameras.main.setZoom(z);
+    cam.setZoom(z);
+  }
+
+  track<T extends Phaser.GameObjects.GameObject>(o: T): T {
+    this.mapObjects.push(o);
+    return o;
   }
 
   /** Tear down the current map and build another, placing the player at `spawn`. */
   loadMap(id: MapId, spawn: { x: number; y: number; dir: Dir }) {
     for (const o of this.mapObjects) o.destroy();
     this.mapObjects = [];
-    for (const v of this.villagers.values()) v.w.destroy();
-    this.villagers.clear();
-    for (const m of this.wild.values()) { this.tweens.killTweensOf(m.sprite); m.destroy(); }
-    this.wild.clear();
-    this.boulders = [];
+    npcSys.unload(this);
+    dronesSys.unload(this);
     this.mailIcons.clear();
     this.stickers.clear();
     this.glows = [];
-    for (const d of this.drones) { d.sprite?.destroy(); d.shadow?.destroy(); d.sprite = d.shadow = undefined; }
+    this.barrier = [];
     this.tilemap?.destroy();
+    this.tilemap = undefined;
+    this.groundLayer = this.decoLayer = undefined;
 
     this.mapId = id;
     this.mapDef = MAPS[id];
     this.data2 = buildWorld(this.mapDef);
     const s = this.state;
-    if (s.bouldersSmashed) for (const b of this.mapDef.boulders) this.data2.solid[b.y][b.x] = false;
-    this.buildTilemap();
+    const { W, H } = this.mapDef;
 
-    const Wpx = this.mapDef.W * TILE, Hpx = this.mapDef.H * TILE;
-    this.cameras.main.setBounds(0, 0, Wpx, Hpx).setRoundPixels(true);
+    if (this.mapDef.interior) {
+      const key = this.mapDef.interior;
+      this.track(this.add.image(0, 0, `${key}_below`).setOrigin(0).setDepth(0));
+      this.track(this.add.image(0, 0, `${key}_above`).setOrigin(0).setDepth(1000));
+    } else {
+      this.buildTilemap();
+    }
+    if (this.mapDef.interior) this.cameras.main.removeBounds();
+    else this.cameras.main.setBounds(0, 0, W * TILE, H * TILE);
     this.applyZoom();
-    this.nightRect = this.track(this.add.rectangle(0, 0, Wpx, Hpx, 0x10183a, 0).setOrigin(0).setDepth(5000));
-    for (const d of this.data2.doors) {
-      this.glows.push(this.track(this.add.image(d.x * TILE + 8, d.y * TILE + 4, "glow").setDepth(5001).setBlendMode(Phaser.BlendModes.ADD).setAlpha(0)));
+    this.ui?.setIndoors?.(!!this.mapDef.interior);
+
+    if (!this.mapDef.interior) {
+      this.nightRect = this.track(this.add.rectangle(0, 0, W * TILE, H * TILE, 0x10183a, 0).setOrigin(0).setDepth(5000));
+      for (const d of this.data2.doors) {
+        this.glows.push(this.track(this.add.image(d.x * TILE + 8, d.y * TILE + 4, "glow").setDepth(5001).setBlendMode(Phaser.BlendModes.ADD).setAlpha(0)));
+      }
+    } else {
+      this.nightRect = undefined;
     }
 
-    // props
-    if (!s.bouldersSmashed) {
-      for (const b of this.mapDef.boulders) {
-        this.boulders.push(this.track(this.add.image(b.x * TILE + 8, b.y * TILE + 16, "boulder").setOrigin(0.5, 1).setDepth(10 + b.y + 1)));
-      }
+    // hotspots are solid; signs get a sprite
+    for (const h of this.mapDef.hotspots) {
+      this.data2.solid[h.y][h.x] = true;
+      if (h.id.endsWith("_sign")) this.track(this.add.image(h.x * TILE + 8, h.y * TILE + 16, "sign").setOrigin(0.5, 1).setDepth(10 + h.y + 1));
+    }
+    for (const d of this.mapDef.decor) {
+      const img = this.track(this.add.image(d.x * TILE, d.y * TILE, d.tex).setOrigin(0).setDepth(d.depth ?? 2));
+      if (d.tex.startsWith("mail_")) img.setDepth(10 + d.y + 0.9);
     }
     for (const m of this.data2.mailboxes) {
       this.track(this.add.image(m.x * TILE + 8, m.y * TILE + 16, "mailbox").setOrigin(0.5, 1).setDepth(10 + m.y + 1));
@@ -188,56 +252,51 @@ export class World extends Phaser.Scene {
       this.tweens.add({ targets: icon, y: icon.y - 3, yoyo: true, repeat: -1, duration: 450, ease: "Sine.inOut" });
       this.mailIcons.set(m.id, icon);
     }
-    this.noticeboard = undefined;
+
+    // place-specific props
+    if (id === "village") this.buildBridgeBarrier();
+    if (id === "point") {
+      const L = LIGHTHOUSE;
+      this.track(this.add.image(L.x * TILE, (L.y + L.h) * TILE, "lighthouse").setOrigin(0, 1).setDepth(10 + L.y + L.h));
+      for (let j = 0; j < L.h; j++) for (let i = 0; i < L.w; i++) this.data2.solid[L.y + j][L.x + i] = true;
+    }
     if (id === "square") {
-      // the post office starts boarded up; each repair pulls a board off
       const post = this.mapDef.buildings.find((b) => b.id === "post")!;
+      const missing = 4 - s.projects.length;
       const spots = [[post.x + 3, post.y + 3], [post.x + 1, post.y + 3], [post.x + 1, post.y + 1], [post.x + 3, post.y + 1]];
-      spots.slice(0, Math.max(0, REPAIRS.length - s.repairs)).forEach(([bx, by]) =>
-        this.track(this.add.image(bx * TILE + 8, by * TILE + 8, "boards").setDepth(6)));
-      this.noticeboard = { x: post.x - 1, y: post.y + 4 };
-      this.track(this.add.image(this.noticeboard.x * TILE + 8, this.noticeboard.y * TILE + 16, "sign").setOrigin(0.5, 1).setDepth(10 + this.noticeboard.y + 1));
-      this.data2.solid[this.noticeboard.y][this.noticeboard.x] = true;
+      spots.slice(0, Math.max(0, missing)).forEach(([bx, by]) => this.track(this.add.image(bx * TILE + 8, by * TILE + 8, "boards").setDepth(6)));
+      dronesSys.buildLockers(this);
     }
+    if (id === "office" && s.projects.includes("room") && !s.delivered.includes("vane1")) officeSys.addTrapdoor(this);
 
-    // people & monsters that are on this map right now
-    for (const def of VILLAGERS) {
-      const at = this.whereIs(def);
-      if (at.map === id) this.spawnVillager(def, at);
-    }
-    for (const m of WILD_MONSTERS) {
-      if (m.map !== id || s.friends.includes(m.id)) continue;
-      const w = new Walker(this, m.sprite, m.x, m.y);
-      w.bob = MONSTER_INFO[m.id].bob;
-      w.place();
-      w.face("down");
-      this.wild.set(m.id, w);
-      this.tweens.add({ targets: w.sprite, y: w.sprite.y - 3, yoyo: true, repeat: -1, duration: 500, ease: "Sine.inOut" });
-    }
+    npcSys.load(this);
+    forageSys.spawn(this);
+    requestSys.spawnItems(this);
+    calendarSys.onLoadMap(this);
+    dronesSys.spawnAmbient(this);
 
-    this.spawnAmbientDrones();
-
-    // player + followers
     this.player.tx = spawn.x;
     this.player.ty = spawn.y;
     this.player.setTexture(this.walkSprite());
+    this.paintPlayer();
     this.player.face(spawn.dir);
     this.player.place();
-    this.trail = [];
-    const back = DIRS[spawn.dir];
-    this.followers.forEach((f, i) => {
-      f.w.tx = spawn.x - back.x * (i + 1);
-      f.w.ty = spawn.y - back.y * (i + 1);
-      f.w.place();
-      f.w.face(spawn.dir);
-    });
-    if (this.mode !== "title") this.cameras.main.startFollow(this.player.sprite, true, 0.15, 0.15, 0, 8);
+    if (this.mode !== "title") this.follow();
     this.refresh();
   }
 
-  track<T extends Phaser.GameObjects.GameObject>(o: T): T {
-    this.mapObjects.push(o);
-    return o;
+  buildBridgeBarrier() {
+    if (has(this.state, "bridge")) return;
+    for (const b of BRIDGE_BARRIER) {
+      this.data2.solid[b.y][b.x] = true;
+      this.barrier.push(this.track(this.add.image(b.x * TILE + 8, b.y * TILE + 8, "boards").setDepth(10 + b.y + 1)));
+    }
+  }
+
+  openBridge() {
+    for (const o of this.barrier) o.destroy();
+    this.barrier = [];
+    for (const b of BRIDGE_BARRIER) if (this.mapId === "village") this.data2.solid[b.y][b.x] = false;
   }
 
   buildTilemap() {
@@ -270,177 +329,37 @@ export class World extends Phaser.Scene {
 
   /** Fade out, swap maps, fade in. */
   travel(to: MapId, spawn: { x: number; y: number; dir: Dir }) {
+    if (this.mode !== "play") return;
     this.mode = "cutscene";
     const cam = this.cameras.main;
-    cam.fadeOut(260, 11, 21, 48);
+    cam.fadeOut(240, 11, 21, 48);
     cam.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
       this.loadMap(to, spawn);
-      cam.fadeIn(320, 11, 21, 48);
+      cam.fadeIn(300, 11, 21, 48);
       this.ui.toast(MAPS[to].name);
       this.mode = "play";
-      this.onArrive();
+      calendarSys.onArrive(this);
     });
   }
 
-  /** First visit to the square: meet the villain. */
-  onArrive() {
-    const s = this.state;
-    if (this.mapId === "square" && !s.metVane) {
-      s.metVane = true;
-      this.say([
-        { name: "Director Vane", portrait: "magician", text: "Ah. You must be Marlo's grandchild. Director Hollis Vane, Swiftline Logistics." },
-        { name: "Director Vane", portrait: "magician", text: "Nothing personal. Efficiency is just… kinder. In twenty days, the Council votes, and this square gets a proper drone hub." },
-        { name: "Director Vane", portrait: "magician", text: "Do enjoy your little route while it lasts." },
-        { text: "Win the town's trust before the vote. Every villager who trusts you (3 hearts) votes for the post office. You need 7 votes." },
-      ]);
-    }
+  // ── Looks ────────────────────────────────────────────────────
+  walkSprite() {
+    return PAINT_SPRITES[this.state?.paint ?? 0];
+  }
+  paintPlayer() {
+    if ((this.state?.paint ?? 0) === 4) this.player.sprite.setTint(0xd9bfff);
+    else this.player.sprite.clearTint();
   }
 
-  // ── Where everyone is ───────────────────────────────────────
-  middayActive() {
-    const s = this.state;
-    return s.pickedUp && s.deliveredToday >= 2 && s.minutes < EVENING;
-  }
-
-  whereIs(def: VillagerDef): Spot {
-    if (def.id === "captain" && this.state.voteWon) return { map: "village", x: 45, y: 21 }; // he moved in next to Marigold
-    if (def.hangout && this.middayActive()) return def.hangout;
-    return { map: def.map, x: def.x, y: def.y };
-  }
-
-  spawnVillager(def: VillagerDef, at: Spot) {
-    const w = new Walker(this, def.sprite, at.x, at.y);
-    w.face("down");
-    this.villagers.set(def.id, { def, w, home: { x: at.x, y: at.y } });
-    return w;
-  }
-
-  /** Move people to where their schedule says, quietly when off-screen and with a fade when on-screen. */
-  refreshSchedule() {
-    const view = this.cameras.main.worldView;
-    const visible = (x: number, y: number) => view.contains(x * TILE + 8, y * TILE + 8);
-    for (const def of VILLAGERS) {
-      const want = this.whereIs(def);
-      const v = this.villagers.get(def.id);
-      if (v && (want.map !== this.mapId || v.home.x !== want.x || v.home.y !== want.y)) {
-        const leave = () => { v.w.destroy(); this.villagers.delete(def.id); };
-        if (visible(v.w.tx, v.w.ty)) {
-          this.tweens.add({ targets: [v.w.sprite, v.w.shadow], alpha: 0, duration: 400, onComplete: () => { leave(); if (want.map === this.mapId) this.arriveVillager(def, want); } });
-        } else {
-          leave();
-          if (want.map === this.mapId) this.arriveVillager(def, want);
-        }
-      } else if (!v && want.map === this.mapId) {
-        this.arriveVillager(def, want);
-      }
-    }
-  }
-
-  arriveVillager(def: VillagerDef, at: Spot) {
-    const occupied = at.x === this.player.tx && at.y === this.player.ty;
-    const w = this.spawnVillager(def, occupied ? { ...at, x: at.x + 1 } : at);
-    w.sprite.setAlpha(0);
-    w.shadow.setAlpha(0);
-    this.tweens.add({ targets: [w.sprite, w.shadow], alpha: 1, duration: 400 });
-  }
-
-  addFollower(id: MonsterId) {
-    const info = MONSTER_INFO[id];
-    const last = this.followers[this.followers.length - 1]?.w ?? this.player;
-    const w = new Walker(this, info.sprite, last.tx, last.ty);
-    w.bob = info.bob;
-    w.place();
-    w.face(this.player.facing);
-    this.followers.push({ id, w });
-  }
-
-  // ── Flow ────────────────────────────────────────────────────
-  startGame(continueGame: boolean) {
-    if (!continueGame && load()) {
-      clearSave();
-      try { sessionStorage.setItem("postal-autostart", "1"); } catch { /* ignore */ }
-      location.reload();
-      return;
-    }
-    this.beginPlay();
-  }
-
-  beginPlay() {
-    this.mode = "play";
-    this.playStartedAt = this.time.now;
-    startMusic();
-    this.cameras.main.startFollow(this.player.sprite, true, 0.15, 0.15, 0, 8);
-    this.ui.setWeather(weatherFor(this.state.day));
-    this.refresh();
-    if (!this.state.introSeen) this.introCutscene();
-    else this.ui.toast(`Day ${this.state.day}`);
-  }
-
-  /** Move the camera to look at a spot, used while characters explain the premise. */
+  /** Move the camera to look at a spot (cutscenes). */
   look(tx: number, ty: number) {
     const cam = this.cameras.main;
     cam.stopFollow();
     cam.pan(tx * TILE + 8, ty * TILE + 8, 1100, "Sine.easeInOut");
   }
 
-  /**
-   * First minutes of the game: grandma's letter, then Postmaster Gull walks you through
-   * what's at stake, who the villain is, and exactly what to do.
-   */
-  introCutscene() {
-    const s = this.state;
-    s.introSeen = true;
-    s.metVane = true;
-    this.mode = "cutscene";
-    const post = this.mapDef.buildings.find((b) => b.id === "post")!;
-    const depot = this.mapDef.buildings.find((b) => b.id === "depot")!;
-    const g = { name: "Postmaster Gull", portrait: "professor" };
-    const vane = { name: "Director Vane", portrait: "magician" };
-    const gull = this.villagers.get("gull")!;
-    gull.w.tx = this.player.tx + 1;
-    gull.w.ty = this.player.ty - 1;
-    gull.w.place();
-    gull.w.face("down");
-    this.player.face("up");
-
-    const letter: Letter = {
-      id: "grandma", to: "you", from: "Grandma Marlo",
-      title: "If You're Reading This…",
-      body: "My dear, the Seabreeze Post Office is yours now. I ran it for forty years.\nIt's broke, it's boarded up, and a company called Swiftline wants to tear it down.\nDon't let them. Deliver the mail. Get to know everyone. Win them back, one letter at a time.\nGull will explain. Pip knows the way. — Gran",
-    };
-    this.ui.showLetter(letter, "You", () => {
-      this.say([
-        { text: "You step into the Town Square of Seabreeze. The Post Office stands in front of you… boarded up.", onShow: () => this.look(post.x + 2, post.y + 2) },
-        { ...g, text: "There you are. Marlo's grandchild. I'm Gull, her postmaster, and the last person on this staff.", onShow: () => this.look(gull.w.tx, gull.w.ty) },
-        { ...g, text: "Your grandmother ran this post office for forty years. When she passed, nobody could keep it running. The town stopped writing. The roof started to leak." },
-        { ...g, text: "And then Swiftline Logistics moved in. Look over there.", onShow: () => this.look(depot.x + 2, depot.y + 1) },
-        { text: "A grey warehouse hums on the edge of the square. Swiftline drones whirr in and out, carrying parcels overhead." },
-        { ...vane, text: "Director Hollis Vane, Swiftline Logistics. Nothing personal, courier. Efficiency is just… kinder.", onShow: () => { const v = this.villagers.get("vane"); if (v) this.look(v.w.tx, v.w.ty); } },
-        { ...vane, text: "In twenty days the Council votes on my offer: this post office comes down, and a drone hub goes up. Do enjoy your little route while it lasts." },
-        { ...g, text: "He means it. Seven of the twelve Council members have to vote to keep us. Right now? Nobody does.", onShow: () => this.look(post.x - 1, post.y + 4) },
-        { ...g, text: "So here's how we win. You deliver the mail: quickly, in person when you can, with a smile. Every villager has hearts for you. Three hearts, and that's a vote for the post office.", onShow: () => this.look(gull.w.tx, gull.w.ty) },
-        { ...g, text: "You get a cut of the postage plus tips, and the better they like you, the bigger the tip. Each night, put some of it into the Repair Fund. Fix the post office board by board." },
-        { ...g, text: "Watch out for the drones: they race you to people's mailboxes, and Swiftline mail sticks to a mailbox like a sticker. Beat them there, and the town notices." },
-        { ...g, text: "Here's your first mailbag, three letters. Your goal is always in the corner of the screen. Go on!" },
-      ], () => {
-        const { fresh } = packBag(s);
-        s.pickedUpAt = Date.now();
-        this.lastDeliveryAt = Date.now();
-        sfx.open();
-        this.mode = "play";
-        this.cameras.main.panEffect.reset(); // end any pan still gliding so follow takes over
-        this.cameras.main.startFollow(this.player.sprite, true, 0.15, 0.15, 0, 8);
-        this.refresh();
-        this.say([
-          { text: `You got the mailbag! (${fresh.length} letters.) TAB shows who they're for. Arrows at the edge of the screen point the way.` },
-          { text: "Arrows / WASD to walk · E to talk & deliver · TAB mailbag · M map · T townsfolk · N mute." },
-        ], () => save(s));
-      });
-    });
-  }
-
-  // ── Main loop ───────────────────────────────────────────────
-  update(_t: number, _dt: number) {
+  // ── Main loop ────────────────────────────────────────────────
+  update(_t: number, dt: number) {
     if (this.mode === "title") {
       this.titlePan += 0.002;
       this.cameras.main.centerOn(
@@ -450,20 +369,26 @@ export class World extends Phaser.Scene {
       this.updateNight();
       return;
     }
-    this.updateDrones();
-    this.updateAmbientDrones();
+    dronesSys.updateAmbient(this);
     this.updateNight();
-    this.ui.setObjective(this.objective());
-    this.ui.updateHud(this.state, this.friendsInfo());
+    this.ui.setObjective(mailSys.objective(this));
+    this.ui.updateHud(this.state, this.helperCard());
     if (this.mode !== "play") {
       this.ui.setPrompt(null);
       this.ui.updateArrows([], this.cameras.main);
       return;
     }
     const busy = this.ui.isBusy();
-    if (!busy) this.handleMovement();
+    if (!busy) {
+      this.playMs += dt;
+      this.state.minutes += dt / MS_PER_MINUTE;
+      calendarSys.tick(this);
+      dronesSys.update(this);
+      if (this.state.minutes >= DAY_END) return this.sleep(true);
+      this.handleMovement();
+    }
     this.ui.setPrompt(busy ? null : this.promptFor());
-    this.ui.updateArrows(this.deliveryTargets(), this.cameras.main);
+    this.ui.updateArrows(mailSys.targets(this), this.cameras.main);
   }
 
   handleMovement() {
@@ -477,59 +402,44 @@ export class World extends Phaser.Scene {
     else dir = this.ui.touch.dir;
     if (!dir) {
       this.player.idle();
-      for (const f of this.followers) if (!f.w.moving) f.w.idle();
       return;
     }
     const nx = this.player.tx + DIRS[dir].x, ny = this.player.ty + DIRS[dir].y;
     if (!this.walkable(nx, ny)) {
       this.player.face(dir);
-      if (this.time.now - this.lastBump > 350) {
-        sfx.bump();
-        this.lastBump = this.time.now;
-        if (this.data2.water[ny]?.[nx] && !this.state.canSwim && !this.warnedWater) {
-          this.warnedWater = true;
-          this.say([{ name: "Pip", text: "Pip stares at the waves, then at you. He doesn't look quite brave enough… yet." }]);
-        }
-      }
+      if (this.time.now - this.lastBump > 350) { sfx.bump(); this.lastBump = this.time.now; }
       return;
     }
-    const swimming = this.data2.water[ny][nx];
-    const zoom = this.state.friends.includes("bzz") && (k.SHIFT.isDown || this.ui.touch.run) && !swimming;
-    const ms = swimming ? SWIM_MS : zoom ? ZOOM_MS : this.state.repairs >= 3 ? BIKE_MS : WALK_MS;
-    this.player.setTexture(swimming ? "swimmer" : this.walkSprite());
-
-    this.trail.unshift({ x: this.player.tx, y: this.player.ty });
-    this.trail.length = Math.min(this.trail.length, this.followers.length);
+    let ms = BIKES[this.state.bikeLevel].ms;
+    if (this.state.helper === "bzz") ms = Math.round(ms * 0.8);
+    if (this.mapDef.interior) ms = Math.max(ms, 160);
+    this.player.setTexture(this.walkSprite());
+    this.paintPlayer();
     this.player.step(dir, ms, () => this.afterStep());
-    this.followers.forEach((f, i) => {
-      const t = this.trail[i];
-      if (t) f.w.stepTo(t.x, t.y, ms);
-    });
-    if (swimming) {
-      sfx.splash();
-      this.puff("ripple", nx, ny, 0.8);
-    } else {
-      sfx.step();
-      if (zoom || Math.random() < 0.3) this.puff("dust", nx, ny, 1);
-    }
+    sfx.step();
+    if (!this.mapDef.interior && Math.random() < 0.25) this.puff("dust", nx, ny, 1);
   }
 
   afterStep() {
     const { tx, ty } = this.player;
+    forageSys.pickup(this, tx, ty);
+    requestSys.pickup(this, tx, ty);
+    dronesSys.pickupParcel(this, tx, ty);
     const warp = this.mapDef.warps.find((w) => tx >= w.x && tx < w.x + w.w && ty >= w.y && ty < w.y + w.h);
-    if (warp && this.mode === "play") this.travel(warp.to, warp.spawn);
+    if (warp && this.mode === "play") {
+      if (warp.needs === "bridge" && !has(this.state, "bridge")) return;
+      this.travel(warp.to, warp.spawn);
+    }
   }
 
   walkable(x: number, y: number) {
     if (x < 0 || y < 0 || x >= this.mapDef.W || y >= this.mapDef.H) return false;
-    const water = this.data2.water[y][x];
-    if (this.data2.solid[y][x] && !(water && this.state.canSwim)) return false;
-    for (const v of this.villagers.values()) if (v.w.tx === x && v.w.ty === y) return false;
-    for (const m of this.wild.values()) if (m.tx === x && m.ty === y) return false;
+    if (this.data2.solid[y][x]) return false;
+    for (const v of this.vils.values()) if (v.w && v.w.tx === x && v.w.ty === y) return false;
     return true;
   }
 
-  // ── Interaction ─────────────────────────────────────────────
+  // ── Interaction ──────────────────────────────────────────────
   facingTile() {
     const d = DIRS[this.player.facing];
     return { x: this.player.tx + d.x, y: this.player.ty + d.y };
@@ -540,14 +450,15 @@ export class World extends Phaser.Scene {
   }
 
   targetAt(x: number, y: number) {
-    for (const v of this.villagers.values()) if (v.w.tx === x && v.w.ty === y) return { kind: "villager" as const, v };
-    for (const [id, m] of this.wild) if (m.tx === x && m.ty === y) return { kind: "wild" as const, id };
+    for (const v of this.vils.values()) if (v.w && v.w.tx === x && v.w.ty === y) return { kind: "villager" as const, v };
     const mb = this.data2.mailboxes.find((m) => m.x === x && m.y === y);
     if (mb) return { kind: "mailbox" as const, id: mb.id };
+    const hs = this.mapDef.hotspots.find((h) => h.x === x && h.y === y);
+    if (hs) return { kind: "hotspot" as const, hs };
+    const wild = npcSys.wildAt(this, x, y);
+    if (wild) return { kind: "wild" as const, id: wild };
     const door = this.data2.doors.find((d) => d.x === x && d.y === y);
     if (door) return { kind: "door" as const, id: door.id };
-    if (this.noticeboard && this.noticeboard.x === x && this.noticeboard.y === y) return { kind: "notice" as const };
-    if (!this.state.bouldersSmashed && this.mapDef.boulders.some((b) => b.x === x && b.y === y)) return { kind: "boulder" as const };
     return null;
   }
 
@@ -557,20 +468,24 @@ export class World extends Phaser.Scene {
     const t = this.targetAt(f.x, f.y);
     if (!t) return null;
     switch (t.kind) {
-      case "villager": return this.lettersFor(t.v.def.id).length ? `E · Hand over mail to ${t.v.def.name}` : `E · Talk to ${t.v.def.name}`;
-      case "wild": return `E · Say hi to the wild ${MONSTER_INFO[t.id].name}`;
+      case "villager": {
+        const id = t.v.def.id;
+        if (mailSys.lettersFor(this, id).length) return `E · Hand over mail to ${t.v.def.name}`;
+        return `E · Talk to ${t.v.def.name}`;
+      }
       case "mailbox": {
         const b = this.building(t.id);
-        return this.lettersFor(b.owner!).length ? "E · Deliver mail" : `E · Mailbox (${b.label})`;
+        return mailSys.lettersFor(this, b.owner!).length ? "E · Deliver mail" : `E · Mailbox (${b.label})`;
       }
-      case "door": return t.id === "home" ? "E · Go to bed" : t.id === "post" ? "E · Post Office" : "E · Knock";
-      case "notice": return "E · Read the noticeboard";
-      case "boulder": return this.state.friends.includes("rocky") ? "E · Rocky, SMASH!" : "E · Inspect boulder";
+      case "hotspot": return `E · ${t.hs.prompt}`;
+      case "wild": return "E · Say hi";
+      case "door": return t.id === "depot" ? "E · Swiftline Depot" : "E · Knock";
     }
   }
 
   onAction() {
     if (this.mode !== "play" || this.time.now - this.playStartedAt < 200) return;
+    if (this.ui.pauseOpen) return;
     if (this.ui.isBusy()) {
       this.ui.advance();
       return;
@@ -581,23 +496,80 @@ export class World extends Phaser.Scene {
     if (!t) return;
     sfx.blip();
     switch (t.kind) {
-      case "villager": return this.talkTo(t.v);
-      case "wild": return this.meetWild(t.id);
+      case "villager": return talkSys.talkTo(this, t.v);
       case "mailbox": {
         const b = this.building(t.id);
-        const mine = this.lettersFor(b.owner!);
-        if (mine.length) return this.deliver(mine, b.owner!, false);
+        const mine = mailSys.lettersFor(this, b.owner!);
+        if (mine.length) return mailSys.deliver(this, mine, b.owner!, false);
         const trusted = (this.state.trust[b.owner!] ?? 0) >= 25;
-        return this.say([{ text: `${b.label}.${trusted ? " The flag is down: no mail for them right now." : " There's a Swiftline sticker on it. They send most of their mail with Swiftline… for now."}` }]);
+        return this.say([{ text: `${b.label}.${trusted ? " The flag is down: no mail for them right now." : " A Swiftline sticker is stuck on the box. They're sending most of their mail with Swiftline… for now."}` }]);
       }
-      case "door": return this.knock(t.id);
-      case "notice": return this.readNoticeboard();
-      case "boulder": return this.boulder();
+      case "hotspot": return this.hotspot(t.hs);
+      case "wild": return npcSys.meetWild(this, t.id);
+      case "door": return talkSys.knock(this, t.id);
     }
   }
 
-  lettersFor(who: string): Letter[] {
-    return this.state.bag.map((id) => letterById(this.state, id)!).filter((l) => l && l.to === who);
+  hotspot(h: Hotspot) {
+    if (officeSys.handle(this, h)) return;
+    switch (h.id) {
+      case "ferry_sign":
+        return this.say([{ text: "FERRY TO DRIFTWOOD COVE\nThe ferry isn't running yet. A hand-painted note says: \"Opens in a future update!\"\nA stack of out-of-town mail sacks waits by the dock, going nowhere for now." }]);
+      case "bridge_sign":
+        return this.say([{ text: has(this.state, "bridge") ? "The footbridge is solid again. Lighthouse Point is just across." : "COLLAPSED FOOTBRIDGE\nThe cliff path to Lighthouse Point has been closed for years. Pay for the repairs at the Projects Desk in the Post Office." }]);
+      case "picnic":
+        return this.say([{ text: "A checked blanket under an old apple tree. Rosa's favourite spot. Someone left a half-finished crossword." }]);
+      case "lighthouse":
+        return this.say([{ text: this.state.springDone ? "The lighthouse turns, slow and golden. Out at sea, a ship answers with a toot." : "The old lighthouse. The lamp room is dusty. The Captain says it just needs one more reason to shine." }]);
+    }
+  }
+
+  say(msgs: Msg[], onDone?: () => void) {
+    this.ui.say(msgs, onDone);
+  }
+
+  // ── Days ─────────────────────────────────────────────────────
+  sleep(late = false) {
+    if (this.mode === "cutscene") return;
+    this.mode = "cutscene";
+    sfx.sleep();
+    const s = this.state;
+    for (const id of s.bag) {
+      const l = letterById(s, id);
+      if (l) { const t = s.trust[l.to] ?? 0; s.trust[l.to] = Math.max(0, t - 1); }
+    }
+    save(s);
+    this.ui.fadeDay(late ? "You doze off… Pip tucks a blanket over you." : "Zzz…", s.day + 1, () => {
+      calendarSys.newDay(this);
+      this.loadMap(PLAYER_START.map, { x: PLAYER_START.x, y: PLAYER_START.y, dir: PLAYER_START.dir });
+      save(s);
+      this.ui.setWeather(weatherFor(s.day));
+      sfx.morning();
+    }, () => {
+      this.mode = "play";
+      this.yawned = false;
+      this.ui.toast(this.dateLine());
+      this.refresh();
+      calendarSys.morning(this, true);
+    });
+  }
+
+  // ── Helpers ──────────────────────────────────────────────────
+  refresh() {
+    const s = this.state;
+    const owners = new Set(s.bag.map((id) => letterById(s, id)?.to));
+    for (const b of this.mapDef.buildings) {
+      this.mailIcons.get(b.id)?.setVisible(!!b.owner && owners.has(b.owner));
+      this.stickers.get(b.id)?.setVisible(!!b.owner && (s.trust[b.owner] ?? 0) < 25);
+    }
+    this.ui.updateHud(s, this.helperCard());
+  }
+
+  helperCard() {
+    const id = this.state.helper;
+    if (!id) return null;
+    const h = HELPERS[id];
+    return { name: h.name, sprite: h.sprite, perk: h.perk };
   }
 
   nameOf(id: string) {
@@ -606,654 +578,14 @@ export class World extends Phaser.Scene {
 
   /** Name + portrait + hearts for a villager's dialogue line. */
   speaker(id: string): Pick<Msg, "name" | "portrait" | "hearts"> {
-    const def = VILLAGERS.find((v) => v.id === id)!;
+    const def = VILLAGERS.find((v) => v.id === id);
+    if (!def) return { name: id };
     return { name: def.name, portrait: def.sprite, hearts: def.voter ? hearts(this.state.trust[id] ?? 0) : undefined };
-  }
-
-  talkTo(v: Villager) {
-    const id = v.def.id;
-    const s = this.state;
-    const dx = this.player.tx - v.w.tx, dy = this.player.ty - v.w.ty;
-    v.w.face(Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? "right" : "left") : dy > 0 ? "down" : "up");
-    if (id === "gull") return this.talkToGull();
-
-    const mine = this.lettersFor(id);
-    if (mine.length) {
-      this.say([{ ...this.speaker(id), text: mine.length > 1 ? "Ooh, a whole stack for me?" : "Oh! Is that for me?" }], () => this.deliver(mine, id, true));
-      return;
-    }
-
-    // a daily chat warms people up a little
-    const t = s.trust[id] ?? 0;
-    const level = id === "vane" ? (s.vaneSoftened ? 3 : s.day > 10 ? 1 : 0) : [0, 1, 3, 3][tier(t).index];
-    let line = chatter(id, level, s.day);
-    if (v.def.voter && !s.chattedToday.includes(id)) {
-      s.chattedToday.push(id);
-      const d = addTrust(s, id, 1);
-      logEvent(s, "chat", id, d);
-      this.heartPop(v.w.tx, v.w.ty, d);
-    }
-    if (id === "mayor" && !s.voteWon) {
-      const tally = voteTally(s);
-      line += `\n(The Council votes in ${Math.max(0, s.voteDay - s.day)} days. Right now ${tally.forYou} of 12 would back the post office. You need ${tally.needed}.)`;
-    }
-
-    const choices: Msg["choices"] = [];
-    if (id === "dot") {
-      choices.push({ label: `Monster Snack (${SNACK_PRICE}c)`, cb: () => this.buy("snack") });
-      choices.push({ label: `Honey Bun, a gift (${BUN_PRICE}c)`, cb: () => this.buy("bun") });
-    }
-    if (id === "mo") choices.push({ label: `Monster Snack (${SNACK_PRICE}c)`, cb: () => this.buy("snack") });
-    if (id === "sable") choices.push({ label: `New uniform colour (${DYE_PRICE}c)`, cb: () => this.buy("dye") });
-    if (v.def.voter && s.buns > 0 && !s.giftedToday.includes(id)) {
-      choices.push({ label: "Give a Honey Bun", cb: () => this.giveBun(v) });
-    }
-    if (choices.length) {
-      choices.push({ label: "Just chatting", cb: () => {} });
-      this.say([{ ...this.speaker(id), text: `${line}${choices.some((c) => c.label.includes("c)")) ? `\nYou have ${s.coins} coins.` : ""}`, choices }]);
-    } else {
-      this.say([{ ...this.speaker(id), text: line }]);
-    }
-  }
-
-  talkToGull() {
-    const s = this.state;
-    const g = { name: "Postmaster Gull", portrait: "professor" };
-    if (!s.pickedUp) {
-      const { fresh, diverted } = packBag(s);
-      s.pickedUpAt = Date.now();
-      this.lastDeliveryAt = Date.now();
-      sfx.open();
-      const lines: Msg[] = [];
-      if (s.day === 1) {
-        lines.push({ ...g, text: "You came! Marlo's grandchild. She talked about you every single day." });
-        lines.push({ ...g, text: "Here's how it works: folks pay postage, you deliver, and you get a cut. Plus tips, if they like you." });
-        lines.push({ ...g, text: "Every house has a red mailbox. Handing letters over in person, and delivering quickly, earns more trust." });
-        lines.push({ ...g, text: "Put what you can into the Repair Fund at night. Fix the post office, win the vote, and we keep our home." });
-      } else {
-        lines.push({ ...g, text: `Morning! ${fresh.length} letters today.` });
-        if (diverted) lines.push({ ...g, text: `Swiftline took ${diverted} more from folks who don't trust us yet. Win them over and their mail comes back to us.` });
-        const hint = this.gullHint();
-        if (hint) lines.push({ ...g, text: hint });
-      }
-      lines.push({ text: `You got the mailbag! (${fresh.length} letters) · TAB to read the addresses · M for the map.` });
-      this.say(lines, () => { this.refresh(); this.scheduleDrones(); });
-      return;
-    }
-    if (s.bag.length === 0) {
-      this.say([{ ...g, text: "Bag's empty! Splendid work. Head home and get some rest. Don't forget the Repair Fund." }]);
-    } else {
-      this.say([{ ...g, text: `Still ${s.bag.length} to go. Follow the little arrows, they point to the mailboxes!` }]);
-    }
-  }
-
-  gullHint(): string {
-    const s = this.state;
-    if (!s.bouldersSmashed && s.delivered.includes("shelly1"))
-      return "There's mail for someone up on the cliffs, but boulders block the path. A Rockitten could smash them… Dot's snacks might tempt one.";
-    if (!s.canSwim && s.delivered.includes("granny1") && s.day >= 3)
-      return `Mail's piling up for Lighthouse Isle. Pip's been watching the waves… (${s.delivered.length}/${SWIM_AFTER} deliveries)`;
-    if (!s.friends.includes("bzz") && s.day >= 3 && s.day % 2 === 1)
-      return "Rosa says a bee keeps buzzing round her meadow. Bees are speedy. Handy for beating drones!";
-    if (s.day >= 6 && s.day % 3 === 0) return "Vane's drones are getting bolder. Deliver fast and they'll turn back empty-handed.";
-    return "";
-  }
-
-  deliver(letters: Letter[], to: string, inPerson: boolean) {
-    const s = this.state;
-    const queue = [...letters];
-    const v = this.villagers.get(to);
-    const at = inPerson && v ? { x: v.w.tx, y: v.w.ty } : (() => {
-      const home = homeOf(to);
-      const mb = home && this.data2.mailboxes.find((m) => m.id === home.building.id);
-      return mb ?? { x: this.player.tx, y: this.player.ty };
-    })();
-    const next = () => {
-      const l = queue.shift();
-      if (!l) return this.afterDeliveries();
-      const now = Date.now();
-      const speedy = now - this.lastDeliveryAt < SPEEDY_MS;
-      this.lastDeliveryAt = now;
-      s.bag = s.bag.filter((id) => id !== l.id);
-      s.delivered.push(l.id);
-      s.deliveredToday++;
-      s.minutes = Math.min(EVENING - 30, s.minutes + MINUTES_PER_DELIVERY);
-
-      // pay: your cut of the postage + a tip that grows with trust
-      const tierIdx = tier(s.trust[to] ?? 0).index;
-      const tip = [0, 2, 4, 6][tierIdx] + (speedy ? 3 : 0) + (l.parcel ? 3 : 0);
-      const pay = 4 + tip;
-      s.coins += pay;
-      s.earnedToday += pay;
-
-      // trust: delivering builds it; in person, speedy and grandma's letters build more
-      const beatDrone = this.drones.some((d) => !d.done && d.letterId === l.id && Date.now() >= d.launchAt);
-      const gain = 5 + (inPerson ? 2 : 0) + (speedy ? 3 : 0) + (l.marlo ? 15 : 0) + (beatDrone ? 2 : 0);
-      const d = to === "vane" ? 0 : addTrust(s, to, gain);
-      logEvent(s, beatDrone ? "beat_drone" : speedy ? "speedy" : inPerson ? "in_person" : "delivered", to, d);
-      this.recallDrone(l.id);
-
-      sfx.deliver();
-      this.time.delayedCall(350, () => sfx.coin());
-      this.burst(at.x, at.y, "heart", 6);
-      this.floatText(at.x, at.y - 0.6, `+${pay}c${speedy ? " speedy!" : ""}`);
-      if (d > 0) this.heartPop(at.x, at.y, d);
-      this.refresh();
-      this.ui.showLetter(l, this.nameOf(to), () => {
-        if (l.id === "vane1") return this.vaneTwist(next);
-        if (l.reply) {
-          const r = letterById(s, l.reply)!;
-          s.bag.push(r.id);
-          this.say([{ ...this.speaker(to), text: `Oh, could you take my reply to ${this.nameOf(r.to)}? Please?` }, { text: `You got a reply letter for ${this.nameOf(r.to)}!` }], next);
-        } else next();
-      });
-    };
-    next();
-  }
-
-  afterDeliveries() {
-    const s = this.state;
-    const msgs: Msg[] = [];
-    if (!s.canSwim && s.delivered.length >= SWIM_AFTER) {
-      s.canSwim = true;
-      sfx.unlock();
-      msgs.push({ name: "Pip", text: "Pweep!! Pip splashes in a puddle, then puffs out his chest." });
-      msgs.push({ text: "Watching you work has made Pip brave. Pip learned SWIM! Walk into the sea to swim. Lighthouse Isle is to the south-east of the village…" });
-    }
-    if (s.pickedUp && s.bag.length === 0) {
-      msgs.push({ text: `That's the last letter! The sun's setting over the bay.\nYou earned ${s.earnedToday}c today. Head home to rest, and decide what goes into the Repair Fund.` });
-      this.tweens.addCounter({
-        from: s.minutes, to: EVENING, duration: 2500,
-        onUpdate: (tw) => { s.minutes = tw.getValue() ?? EVENING; },
-        onComplete: () => { s.minutes = EVENING; this.refreshSchedule(); save(s); }, // everyone heads home for the evening
-      });
-    }
-    this.refreshSchedule();
-    this.refresh();
-    if (msgs.length) this.say(msgs, () => this.refresh());
-    save(s);
-  }
-
-  heartPop(tx: number, ty: number, delta: number) {
-    if (delta <= 0) return;
-    const h = this.add.image(tx * TILE + 8, ty * TILE - 10, "heart").setDepth(4600).setScale(1.4);
-    const t = this.add.text(tx * TILE + 15, ty * TILE - 14, "+", {
-      fontFamily: "Pixelify Sans, monospace", fontSize: "8px", color: "#ff6b81", stroke: "#3a1020", strokeThickness: 2, resolution: 4,
-    }).setOrigin(0.5).setDepth(4600);
-    this.tweens.add({ targets: [h, t], y: "-=14", alpha: 0, duration: 1100, ease: "Cubic.out", onComplete: () => { h.destroy(); t.destroy(); } });
-  }
-
-  buy(what: "snack" | "bun" | "dye") {
-    const s = this.state;
-    const price = what === "snack" ? SNACK_PRICE : what === "bun" ? BUN_PRICE : DYE_PRICE;
-    if (s.coins < price) {
-      this.say([{ text: "Not quite enough coins. Deliver some mail and come back!" }]);
-      return;
-    }
-    s.coins -= price;
-    sfx.coin();
-    if (what === "snack") {
-      s.snacks++;
-      this.say([{ text: `You bought a crunchy Monster Snack! (You have ${s.snacks}.) Wild monsters can't resist them.` }]);
-    } else if (what === "bun") {
-      s.buns++;
-      this.say([{ text: `A warm Honey Bun! (You have ${s.buns}.) Give it to someone in town: people love being brought a treat.` }]);
-    } else {
-      s.uniform = (s.uniform + 1) % UNIFORMS.length;
-      this.player.setTexture(this.walkSprite());
-      sfx.unlock();
-      this.burst(this.player.tx, this.player.ty, "sparkle", 12);
-      this.say([{ name: "Sable the Tailor", portrait: "fashionista", text: `Swish! ${UNIFORMS[s.uniform].name}. Now you look like someone people trust.` }]);
-    }
-    this.refresh();
-    save(s);
-  }
-
-  giveBun(v: Villager) {
-    const s = this.state;
-    s.buns--;
-    s.giftedToday.push(v.def.id);
-    const d = addTrust(s, v.def.id, 8);
-    logEvent(s, "gift", v.def.id, d);
-    sfx.befriend();
-    this.burst(v.w.tx, v.w.ty, "heart", 8);
-    this.heartPop(v.w.tx, v.w.ty, d);
-    this.say([{ ...this.speaker(v.def.id), text: "For me? Oh, you shouldn't have. (They absolutely should have.)" }]);
-    save(s);
-  }
-
-  walkSprite() {
-    return UNIFORMS[this.state.uniform ?? 0].sprite;
-  }
-
-  meetWild(id: MonsterId) {
-    const s = this.state;
-    if (s.snacks <= 0) {
-      const flavour = id === "rocky" ? "The wild Rockitten headbutts a pebble and stares at your bag." : "The wild bee buzzes in a happy loop around the flowers… then sniffs your bag.";
-      this.say([{ text: `${flavour}\nMaybe it would like a Monster Snack from Dot's Bakery or Mo's Mart?` }]);
-      return;
-    }
-    this.say([{
-      text: id === "rocky" ? "The wild Rockitten eyes your snack." : "The wild bee hovers closer to your snack.",
-      choices: [
-        { label: "Offer a Monster Snack", cb: () => this.befriend(id) },
-        { label: "Not now", cb: () => {} },
-      ],
-    }]);
-  }
-
-  befriend(id: MonsterId) {
-    const s = this.state;
-    const info = MONSTER_INFO[id];
-    const w = this.wild.get(id)!;
-    s.snacks--;
-    s.friends.push(id);
-    sfx.befriend();
-    this.burst(w.tx, w.ty, "heart", 10);
-    this.tweens.killTweensOf(w.sprite);
-    w.destroy();
-    this.wild.delete(id);
-    this.addFollower(id);
-    const how = id === "rocky"
-      ? "Ability: SMASH. Face a boulder and press E. Those rocks blocking the cliff path don't stand a chance."
-      : "Ability: ZOOM. Hold SHIFT (or the Run button) to dash at bee speed. Perfect for beating drones!";
-    this.say([{ text: `${info.name} munches the snack happily… and decides to follow you!` }, { text: `${info.name} joined your route! ${how}` }], () => this.refresh());
-    save(s);
-  }
-
-  boulder() {
-    if (!this.state.friends.includes("rocky")) {
-      this.say([{ text: "A huge boulder blocks the path to the cliffside. You hear a kid humming somewhere beyond it.\nA strong monster might be able to smash it…" }]);
-      return;
-    }
-    this.mode = "cutscene";
-    sfx.smash();
-    this.cameras.main.shake(300, 0.006);
-    for (const b of this.boulders) {
-      this.burst(Math.floor(b.x / TILE), Math.floor(b.y / TILE) - 1, "dust", 14);
-      this.tweens.add({ targets: b, alpha: 0, scale: 1.3, duration: 350, onComplete: () => b.destroy() });
-    }
-    this.boulders = [];
-    for (const b of this.mapDef.boulders) this.data2.solid[b.y][b.x] = false;
-    this.state.bouldersSmashed = true;
-    save(this.state);
-    this.time.delayedCall(600, () => {
-      this.mode = "play";
-      sfx.unlock();
-      this.say([{ name: "Rocky", text: "Mrrrrow! ✦" }, { text: "Rocky smashed the boulders! The Cliffside path is open. Someone lives up there…" }]);
-    });
-  }
-
-  readNoticeboard() {
-    const s = this.state;
-    const tally = voteTally(s);
-    const next = REPAIRS[s.repairs];
-    const fund = next ? `Repair Fund: ${s.repairFund} / ${next.cost}c for "${next.name}".` : "The post office is fully repaired!";
-    this.say([{
-      text: `SEABREEZE POST OFFICE: SAVE OUR POST!\n${s.voteWon ? "The Council voted to keep us. Thank you!" : `Council vote in ${Math.max(0, s.voteDay - s.day)} days. Votes for us: ${tally.forYou} of ${tally.needed} needed.`}\n${fund}`,
-    }]);
-  }
-
-  knock(id: string) {
-    const s = this.state;
-    if (id === "home") {
-      const msgs: Msg[] = [];
-      const pay = Math.min(s.earnedToday, s.coins);
-      if (pay > 0 && s.repairs < REPAIRS.length) {
-        const half = Math.floor(pay / 2);
-        const next = REPAIRS[s.repairs];
-        msgs.push({
-          text: `Before bed: how much of today's pay (${pay}c) goes into the Repair Fund?\nFund: ${s.repairFund} / ${next.cost}c → "${next.name}"`,
-          choices: [
-            { label: `All of it (${pay}c)`, cb: () => this.fund(pay) },
-            { label: `Half (${half}c)`, cb: () => this.fund(half) },
-            { label: "Keep it for myself", cb: () => this.fund(0) },
-          ],
-        });
-      } else {
-        msgs.push({
-          text: s.bag.length ? `You still have ${s.bag.length} letters. They'll keep till tomorrow (folks won't love the wait). Go to bed?` : "Cosy bed, warm blanket, Pip's little snores. Go to bed?",
-          choices: [
-            { label: "Sleep", cb: () => this.sleep() },
-            { label: "Not yet", cb: () => {} },
-          ],
-        });
-      }
-      this.say(msgs);
-      return;
-    }
-    if (id === "post") return this.talkToGull();
-    if (id === "depot") {
-      this.say([{ text: "SWIFTLINE LOGISTICS · DEPOT 7\n\"Delivery without the small talk.\"\nThe door is locked. Something whirs inside." }]);
-      return;
-    }
-    const b = this.building(id);
-    this.say([{ text: `Knock knock… The door of ${b.label} is shut. Mail goes in the red mailbox!` }]);
-  }
-
-  fund(amount: number) {
-    const s = this.state;
-    s.coins -= amount;
-    s.repairFund += amount;
-    while (s.repairs < REPAIRS.length && s.repairFund >= REPAIRS[s.repairs].cost) {
-      const r = REPAIRS[s.repairs];
-      s.repairFund -= r.cost;
-      s.repairs++;
-      this.pendingNews.push({ text: `Overnight, the town pitched in: "${r.name}" is done!\n${r.perk}` });
-      if (s.repairs === 1) for (const v of VILLAGERS) if (v.voter) addTrust(s, v.id, 5);
-    }
-    if (amount > 0) sfx.coin();
-    this.sleep();
-  }
-
-  // ── Days ────────────────────────────────────────────────────
-  sleep() {
-    this.mode = "cutscene";
-    sfx.sleep();
-    const s = this.state;
-    for (const id of s.bag) {
-      const l = letterById(s, id);
-      if (l) addTrust(s, l.to, -2); // nobody likes their mail sitting in a bag overnight
-    }
-    save(s);
-    this.ui.fadeDay("Zzz…", s.day + 1, () => {
-      overnightGossip(s);
-      s.day++;
-      s.minutes = DAY_START;
-      s.pickedUp = false;
-      s.deliveredToday = 0;
-      s.earnedToday = 0;
-      s.chattedToday = [];
-      s.giftedToday = [];
-      for (const d of this.drones) { d.sprite?.destroy(); d.shadow?.destroy(); }
-      this.drones = [];
-      this.loadMap(PLAYER_START.map, { x: PLAYER_START.x, y: PLAYER_START.y, dir: "down" });
-      save(s);
-      this.ui.setWeather(weatherFor(s.day));
-      sfx.morning();
-    }, () => {
-      this.mode = "play";
-      this.ui.toast(`Day ${s.day} · ${weatherFor(s.day)}`);
-      this.refresh();
-      const news = this.pendingNews.splice(0);
-      if (s.day >= s.voteDay && !s.voteWon) news.push({ text: "Today's the day. The Council is meeting at the fountain in the Town Square…" });
-      if (news.length) this.say(news, () => { if (s.day >= s.voteDay && !s.voteWon) this.councilVote(); });
-    });
-  }
-
-  /** The finale: the Council meets in the square. */
-  councilVote() {
-    const s = this.state;
-    this.mode = "cutscene";
-    this.cameras.main.fadeOut(300, 11, 21, 48);
-    this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
-      this.loadMap("square", { x: 19, y: 20, dir: "up" });
-      this.cameras.main.fadeIn(400, 11, 21, 48);
-      const tally = voteTally(s);
-      const won = tally.forYou >= tally.needed;
-      const mayor = { name: "Mayor Hollyhock", portrait: "ceo" };
-      const lines: Msg[] = [
-        { ...mayor, text: "Order, order! The Council of Seabreeze will now vote: sign with Swiftline, or keep our post office?" },
-        { ...mayor, text: `The votes are in… ${tally.forYou} for the post office.` },
-      ];
-      if (won) {
-        lines.push({ ...mayor, text: "The Seabreeze Post Office STAYS!" });
-        lines.push({ name: "Director Vane", portrait: "magician", text: s.vaneSoftened ? "…Good. It should stay. Thank you, courier." : "…Inefficient. Sentimental. Fine. Swiftline withdraws." });
-      } else {
-        lines.push({ ...mayor, text: `That's not enough: we needed ${tally.needed}. But it's close, and this town is clearly changing its mind.` });
-        lines.push({ ...mayor, text: "The Council will meet again in five days. Make them count, courier." });
-      }
-      this.say(lines, () => {
-        if (won) {
-          s.voteWon = true;
-          this.drones = [];
-          save(s);
-          this.ui.festival(() => {
-            s.festivalSeen = true;
-            save(s);
-            this.mode = "play";
-            this.say([{ text: "The post office is saved! The story of this season is told… but the mail never stops. Thanks for playing! ♥" }]);
-          });
-        } else {
-          s.voteDay = s.day + 5;
-          save(s);
-          this.mode = "play";
-        }
-      });
-    });
-  }
-
-  vaneTwist(next: () => void) {
-    const s = this.state;
-    s.vaneSoftened = true;
-    for (const d of this.drones) d.done = true;
-    save(s);
-    this.say([
-      { name: "Director Vane", portrait: "magician", text: "This is… my mother's handwriting." },
-      { name: "Director Vane", portrait: "magician", text: "She left when I was nine. I waited by that window every day for a letter. It never came. I thought she forgot me." },
-      { name: "Director Vane", portrait: "magician", text: "It was in your post office the whole time. Stuck behind a sorting tray for thirty years." },
-      { name: "Director Vane", portrait: "magician", text: "…I'm grounding the drones. I need to think." },
-    ], next);
-  }
-
-  /** The single line in the corner telling the player what to do right now. */
-  objective(): string {
-    const s = this.state;
-    if (s.voteWon) return "The post office is saved! Keep delivering, and keep making friends.";
-    if (!s.pickedUp) return this.mapId === "square" ? "Pick up today's mail from Postmaster Gull, by the post office." : "Walk up the North Road to the Town Square to collect today's mail.";
-    if (s.bag.length) return `Deliver the mail: ${s.bag.length} ${s.bag.length === 1 ? "letter" : "letters"} left. Beat the drones, win hearts.`;
-    return s.repairs < REPAIRS.length ? "All delivered! Go home (your cottage, in the village) to fund repairs and sleep." : "All delivered! Go home and sleep.";
-  }
-
-  // ── Swiftline drones ────────────────────────────────────────
-  /** Swiftline drones are always buzzing around the square: they're really there. */
-  spawnAmbientDrones() {
-    this.ambient = [];
-    if (this.mapId !== "square" || this.state.vaneSoftened || this.state.voteWon) return;
-    const defs = [
-      { cx: 40, cy: 22, rx: 4, ry: 2, speed: 0.0007, phase: 0 },
-      { cx: 25, cy: 21, rx: 10, ry: 3, speed: 0.00035, phase: 2 },
-      { cx: 16, cy: 12, rx: 6, ry: 2, speed: 0.0005, phase: 4 },
-    ];
-    for (const d of defs) {
-      const shadow = this.track(this.add.ellipse(0, 0, 12, 4, 0x000000, 0.22).setDepth(9));
-      const sprite = this.track(this.add.image(0, 0, "drone").setDepth(4400).setScale(1.5));
-      this.ambient.push({ sprite, shadow, ...d });
-    }
-  }
-
-  updateAmbientDrones() {
-    const t = this.time.now;
-    for (const d of this.ambient) {
-      if (!d.sprite.active) continue;
-      const a = t * d.speed + d.phase;
-      const x = (d.cx + Math.cos(a) * d.rx) * TILE + 8;
-      const y = (d.cy + Math.sin(a) * d.ry) * TILE;
-      d.sprite.setPosition(x, y + Math.sin(t / 160 + d.phase) * 2).setFlipX(-Math.sin(a) * d.rx > 0);
-      d.shadow.setPosition(x, y + 22);
-    }
-  }
-
-  scheduleDrones() {
-    const s = this.state;
-    if (s.day < 2 || s.vaneSoftened || s.voteWon) return;
-    const count = s.day >= 6 ? 2 : 1;
-    // drones go after ordinary mail; never replies, grandma's letters, or key story notes
-    const targets = s.bag.filter((id) => {
-      const l = letterById(s, id);
-      return l && !l.reply && !l.marlo && !["vane1", "mayor1"].includes(id);
-    }).sort(() => Math.random() - 0.5).slice(0, count);
-    targets.forEach((id, i) => {
-      const l = letterById(s, id)!;
-      const home = homeOf(l.to);
-      if (!home) return;
-      const map = MAPS[home.map];
-      const b = home.building;
-      const door = { x: b.x + b.door, y: b.y + 4 };
-      const depot = MAPS.square.buildings.find((x) => x.id === "depot")!;
-      const from = home.map === "square" ? { x: depot.x + 3, y: depot.y } : { x: map.warps[0].x + 1, y: 0 };
-      const launchAt = Date.now() + DRONE_DELAY_MS * (i + 1);
-      this.drones.push({ letterId: id, to: l.to, map: home.map, from, dest: { x: door.x + 1, y: door.y - 1 }, launchAt, arriveAt: launchAt + DRONE_FLIGHT_MS, announced: false, done: false });
-    });
-  }
-
-  recallDrone(letterId: string) {
-    for (const d of this.drones) {
-      if (d.letterId !== letterId || d.done) continue;
-      d.done = true;
-      if (d.sprite) {
-        const spr = d.sprite, sh = d.shadow;
-        this.tweens.add({ targets: [spr, sh], alpha: 0, y: "-=20", duration: 800, onComplete: () => { spr.destroy(); sh?.destroy(); } });
-        d.sprite = d.shadow = undefined;
-      }
-      if (Date.now() >= d.launchAt) this.ui.toast("You beat the drone! It buzzes off, empty-handed.");
-    }
-  }
-
-  updateDrones() {
-    const s = this.state;
-    const now = Date.now();
-    for (const d of this.drones) {
-      if (d.done || now < d.launchAt) continue;
-      if (!s.bag.includes(d.letterId)) { this.recallDrone(d.letterId); continue; }
-      if (!d.announced) {
-        d.announced = true;
-        sfx.bump();
-        this.ui.toast(`A Swiftline drone is heading for ${this.nameOf(d.to)}'s mailbox!`);
-      }
-      if (now >= d.arriveAt) {
-        d.done = true;
-        s.bag = s.bag.filter((id) => id !== d.letterId);
-        s.delivered.push(d.letterId); // it still arrives, just not by you (story continues)
-        s.swiftlineTook++;
-        const delta = addTrust(s, d.to, -3);
-        logEvent(s, "drone_beat", d.to, delta);
-        d.sprite?.destroy(); d.shadow?.destroy(); d.sprite = d.shadow = undefined;
-        sfx.smash();
-        this.ui.toast(`Too slow! Swiftline delivered ${this.nameOf(d.to)}'s letter.`);
-        this.refresh();
-        save(s);
-        if (s.pickedUp && s.bag.length === 0) this.afterDeliveries();
-        continue;
-      }
-      if (d.map !== this.mapId) {
-        if (d.sprite) { d.sprite.destroy(); d.shadow?.destroy(); d.sprite = d.shadow = undefined; }
-        continue;
-      }
-      const p = (now - d.launchAt) / (d.arriveAt - d.launchAt);
-      const x = (d.from.x + (d.dest.x - d.from.x) * p) * TILE + 8;
-      const y = (d.from.y + (d.dest.y - d.from.y) * p) * TILE + 8;
-      if (!d.sprite) {
-        d.shadow = this.add.ellipse(x, y + 18, 12, 4, 0x000000, 0.25).setDepth(9);
-        d.sprite = this.add.image(x, y, "drone").setDepth(4400).setScale(1.5);
-      }
-      d.sprite.setPosition(x, y + Math.sin(now / 180) * 2).setFlipX(d.dest.x < d.from.x);
-      d.shadow!.setPosition(x, y + 18);
-    }
-  }
-
-  // ── Gossip ──────────────────────────────────────────────────
-  gossipTick() {
-    if (this.mode !== "play" || this.ui.isBusy() || this.time.now - this.lastGossipAt < 7000) return;
-    const s = this.state;
-    const view = this.cameras.main.worldView;
-    const here = [...this.villagers.values()].filter((v) => v.def.voter && view.contains(v.w.px, v.w.py - 8));
-    for (const a of here) {
-      for (const b of here) {
-        if (a === b || Math.abs(a.w.tx - b.w.tx) + Math.abs(a.w.ty - b.w.ty) > 3) continue;
-        const i = gossipBetween(s, a.def.id, b.def.id);
-        if (i < 0) continue;
-        const e = s.events[i];
-        const [l1, l2] = gossipLines(e.type, e.day + i);
-        this.lastGossipAt = this.time.now;
-        this.bubble(a.w, l1, 0);
-        this.time.delayedCall(1900, () => {
-          this.bubble(b.w, l2, 0);
-          const d = hearGossip(s, i, b.def.id);
-          if (d > 0) this.time.delayedCall(900, () => this.heartPop(b.w.tx, b.w.ty, d));
-          if (d < 0) this.floatText(b.w.tx, b.w.ty - 0.6, "hmm…");
-          save(s);
-        });
-        return;
-      }
-    }
-  }
-
-  bubble(w: Walker, text: string, delay: number) {
-    const t = this.add.text(w.px, w.py - 36, text, {
-      fontFamily: "Pixelify Sans, monospace", fontSize: "8px", color: "#3b2a1a", backgroundColor: "#fff4dc",
-      padding: { x: 4, y: 3 }, wordWrap: { width: 120 }, align: "center", resolution: 4,
-    }).setOrigin(0.5, 1).setDepth(4700).setAlpha(0);
-    this.tweens.add({ targets: t, alpha: 1, y: t.y - 4, delay, duration: 200, hold: 2600, yoyo: true, onComplete: () => t.destroy() });
-  }
-
-  // ── Helpers ─────────────────────────────────────────────────
-  say(msgs: Msg[], onDone?: () => void) {
-    this.ui.say(msgs, onDone);
-  }
-
-  refresh() {
-    const s = this.state;
-    const owners = new Set(s.bag.map((id) => letterById(s, id)?.to));
-    for (const b of this.mapDef.buildings) {
-      this.mailIcons.get(b.id)?.setVisible(!!b.owner && owners.has(b.owner));
-      this.stickers.get(b.id)?.setVisible(!!b.owner && (s.trust[b.owner] ?? 0) < 25);
-    }
-    this.ui.updateHud(s, this.friendsInfo());
-  }
-
-  friendsInfo() {
-    return this.state.friends.map((id) => ({ ...MONSTER_INFO[id], id, locked: id === "pip" && !this.state.canSwim }));
-  }
-
-  /** Where the arrows point: mailboxes here, people here, or the road to the other map. */
-  deliveryTargets() {
-    const s = this.state;
-    const out: { x: number; y: number; label?: string }[] = [];
-    let elsewhere: MapId | null = null;
-    const exitTo = (to: MapId) => {
-      if (elsewhere) return;
-      elsewhere = to;
-      const w = this.mapDef.warps.find((x) => x.to === to)!;
-      out.push({ x: (w.x + w.w / 2) * TILE, y: w.y * TILE + 8, label: `→ ${MAPS[to].name}` });
-    };
-    const seen = new Set<string>();
-    for (const id of s.bag) {
-      const l = letterById(s, id);
-      if (!l || seen.has(l.to)) continue;
-      seen.add(l.to);
-      const here = this.villagers.get(l.to);
-      if (here) {
-        // they're out and about on this map: hand it over in person
-        out.push({ x: here.w.px, y: here.w.py - 16 });
-        continue;
-      }
-      const home = homeOf(l.to);
-      if (home) {
-        if (home.map !== this.mapId) { exitTo(home.map); continue; }
-        const mb = this.data2.mailboxes.find((m) => m.id === home.building.id);
-        if (mb) out.push({ x: mb.x * TILE + 8, y: mb.y * TILE });
-      } else {
-        const def = VILLAGERS.find((v) => v.id === l.to);
-        if (!def) continue;
-        const at = this.whereIs(def);
-        if (at.map !== this.mapId) { exitTo(at.map); continue; }
-        const v = this.villagers.get(l.to);
-        if (v) out.push({ x: v.w.px, y: v.w.py - 16 });
-      }
-    }
-    if (!s.pickedUp) {
-      if (this.mapId === "square") {
-        const gull = this.villagers.get("gull");
-        if (gull) out.push({ x: gull.w.px, y: gull.w.py - 16 });
-      } else exitTo("square");
-    }
-    return out;
   }
 
   mapInfo(): MapInfo {
     const s = this.state;
-    const targets = this.deliveryTargets();
+    const targets = mailSys.targets(this);
     const other = targets.find((t) => t.label);
     return {
       title: this.mapDef.name,
@@ -1263,15 +595,14 @@ export class World extends Phaser.Scene {
         id: b.id, label: b.label, x: b.x + b.door + 0.5, y: b.y,
         hearts: b.owner ? hearts(s.trust[b.owner] ?? 0) : undefined,
       })),
-      regions: this.mapDef.regions.map((r) => ({
-        label: r.label, x: r.x, y: r.y,
-        locked: r.lock === "smash" ? !s.bouldersSmashed : r.lock === "swim" ? !s.canSwim : false,
-      })),
+      regions: this.mapDef.regions.map((r) => ({ label: r.label, x: r.x, y: r.y, locked: r.lock === "bridge" ? !has(s, "bridge") : false })),
       elsewhere: other ? other.label!.replace("→ ", "") : undefined,
     };
   }
 
+  // ── Night, water and sparkle ─────────────────────────────────
   updateNight() {
+    if (!this.nightRect) { this.ui.setNight(0); return; }
     const m = this.mode === "title" ? 19 * 60 : this.state.minutes;
     const h = m / 60;
     let night = 0;
@@ -1280,9 +611,11 @@ export class World extends Phaser.Scene {
     const color = night > 0.3 ? 0x101a40 : 0xff8a3c;
     this.nightRect.setFillStyle(color, night > 0.3 ? night * 0.55 : dusk + night * 0.5);
     for (const g of this.glows) g.setAlpha(Math.max(night, dusk * 2) * 0.9);
+    this.ui.setNight(night);
   }
 
   animateWater() {
+    if (!this.groundLayer) return;
     this.waterFrame = (this.waterFrame + 1) % WATER_FRAMES.length;
     const gidNow = WATER_FRAMES[this.waterFrame];
     for (const c of this.data2.waterCells) {
@@ -1291,9 +624,8 @@ export class World extends Phaser.Scene {
     }
   }
 
-  fountainFrame = 0;
   animateFountain() {
-    if (!this.data2.fountainCells.length) return;
+    if (!this.decoLayer || !this.data2.fountainCells.length) return;
     this.fountainFrame = (this.fountainFrame + 1) % FOUNTAIN.frameOffsets.length;
     const off = FOUNTAIN.frameOffsets[this.fountainFrame];
     for (const c of this.data2.fountainCells) {
@@ -1303,6 +635,7 @@ export class World extends Phaser.Scene {
   }
 
   sparkle() {
+    if (this.mapDef.interior) return;
     const view = this.cameras.main.worldView;
     for (let i = 0; i < 3; i++) {
       const x = Math.floor((view.x + Math.random() * view.width) / TILE);
@@ -1313,26 +646,7 @@ export class World extends Phaser.Scene {
     }
   }
 
-  wanderTick() {
-    if (this.mode !== "play" || this.ui.isBusy()) return;
-    const dirs: Dir[] = ["up", "down", "left", "right"];
-    for (const v of this.villagers.values()) {
-      if (v.def.wander === 0 || v.w.moving || Math.random() < 0.5) continue;
-      if (v.def.hangout && this.middayActive()) continue; // stay put and chat
-      const dir = dirs[Math.floor(Math.random() * 4)];
-      const nx = v.w.tx + DIRS[dir].x, ny = v.w.ty + DIRS[dir].y;
-      const far = Math.abs(nx - v.home.x) > v.def.wander || Math.abs(ny - v.home.y) > v.def.wander;
-      const onPlayer = nx === this.player.tx && ny === this.player.ty;
-      const onFollower = this.followers.some((f) => f.w.tx === nx && f.w.ty === ny);
-      if (far || onPlayer || onFollower || !this.walkable(nx, ny) || this.data2.water[ny][nx]) {
-        v.w.face(dir);
-        continue;
-      }
-      v.w.step(dir, 320, () => v.w.idle());
-    }
-    for (const m of this.wild.values()) if (Math.random() < 0.4) m.face(dirs[Math.floor(Math.random() * 4)]);
-  }
-
+  // ── Effects ──────────────────────────────────────────────────
   puff(key: string, tx: number, ty: number, alpha: number) {
     const p = this.add.image(tx * TILE + 8, ty * TILE + 14, key).setDepth(9).setAlpha(alpha);
     this.tweens.add({ targets: p, alpha: 0, scale: 1.8, y: p.y - 2, duration: 420, onComplete: () => p.destroy() });
@@ -1355,4 +669,27 @@ export class World extends Phaser.Scene {
     }).setOrigin(0.5).setDepth(4600);
     this.tweens.add({ targets: t, y: t.y - 14, alpha: 0, duration: 1300, ease: "Cubic.out", onComplete: () => t.destroy() });
   }
+
+  heartPop(tx: number, ty: number, delta: number) {
+    if (delta <= 0) return;
+    const h = this.add.image(tx * TILE + 8, ty * TILE - 10, "heart").setDepth(4600).setScale(1.4);
+    this.tweens.add({ targets: h, y: "-=14", alpha: 0, duration: 1100, ease: "Cubic.out", onComplete: () => h.destroy() });
+  }
+
+  bubble(w: Walker, text: string) {
+    const t = this.add.text(w.px, w.py - 36, text, {
+      fontFamily: "Pixelify Sans, monospace", fontSize: "8px", color: "#3b2a1a", backgroundColor: "#fff4dc",
+      padding: { x: 4, y: 3 }, wordWrap: { width: 120 }, align: "center", resolution: 4,
+    }).setOrigin(0.5, 1).setDepth(4700).setAlpha(0);
+    this.tweens.add({ targets: t, alpha: 1, y: t.y - 4, duration: 200, hold: 2600, yoyo: true, onComplete: () => t.destroy() });
+  }
+
+  // exported for systems
+  get bagCap() { return bagSize(this.state); }
+  get paints() { return PAINTS; }
+  get eveningAt() { return EVENING; }
+  get dayStart() { return DAY_START; }
+  homeOf = homeOf;
+  lockerSpots = LOCKER_SPOTS;
+  overnightGossip = () => overnightGossip(this.state);
 }

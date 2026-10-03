@@ -1,7 +1,7 @@
 // Trust: one number (0–100) per villager. Players never see the number, only hearts and tiers.
 // Word of mouth: when trust changes, the event is logged; friends who later "hear" it
 // (gossip in the square, or overnight) get a share of the change.
-import { VILLAGERS, VOTES_NEEDED } from "../world/layout";
+import { VILLAGERS } from "../world/layout";
 import type { GameState } from "./state";
 
 export const VOTE_AT = 60;
@@ -23,9 +23,10 @@ export function tier(trust: number): Tier {
 
 export const voters = () => VILLAGERS.filter((v) => v.voter);
 
-export function voteTally(s: GameState) {
+/** How many of the town's 12 count you as a friend (3+ hearts). */
+export function friendCount(s: GameState) {
   const forYou = voters().filter((v) => (s.trust[v.id] ?? 0) >= VOTE_AT).length;
-  return { forYou, needed: VOTES_NEEDED, total: voters().length };
+  return { forYou, total: voters().length };
 }
 
 export function friendsOf(id: string) {
