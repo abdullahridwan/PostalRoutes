@@ -108,9 +108,12 @@ export class World extends Phaser.Scene {
     npcSys.init(this);
     if (!this.state.requests.length) requestSys.generate(this);
 
-    const first = !this.state.introSeen;
-    const start = first ? INTRO_START : PLAYER_START;
-    this.loadMap(start.map, { x: start.x, y: start.y, dir: start.dir });
+    // the title screen floats over Lighthouse Point at dusk; the real start map loads when you press play
+    const start = this.startSpot();
+    let autostart = false;
+    try { autostart = sessionStorage.getItem("postal-autostart") === "1"; sessionStorage.removeItem("postal-autostart"); } catch { /* ignore */ }
+    if (autostart) this.loadMap(start.map, { x: start.x, y: start.y, dir: start.dir });
+    else this.loadMap("point", { x: 3, y: 19, dir: "right" });
 
     this.time.addEvent({ delay: 280, loop: true, callback: () => this.animateWater() });
     this.time.addEvent({ delay: 220, loop: true, callback: () => this.animateFountain() });
@@ -119,13 +122,12 @@ export class World extends Phaser.Scene {
     this.time.addEvent({ delay: 2500, loop: true, callback: () => talkSys.gossipTick(this) });
 
     this.cameras.main.centerOn((this.mapDef.W / 2) * TILE, (this.mapDef.H / 2) * TILE);
-    let autostart = false;
-    try {
-      autostart = sessionStorage.getItem("postal-autostart") === "1";
-      sessionStorage.removeItem("postal-autostart");
-    } catch { /* ignore */ }
     if (autostart) this.beginPlay();
     else this.ui.showTitle(!!load(), () => this.startGame(false), () => this.startGame(true));
+  }
+
+  startSpot() {
+    return this.state.introSeen ? PLAYER_START : INTRO_START;
   }
 
   startGame(continueGame: boolean) {
@@ -139,6 +141,8 @@ export class World extends Phaser.Scene {
   }
 
   beginPlay() {
+    const start = this.startSpot();
+    if (this.mapId !== start.map) this.loadMap(start.map, { x: start.x, y: start.y, dir: start.dir });
     this.mode = "play";
     this.playStartedAt = this.time.now;
     startMusic();
@@ -176,7 +180,9 @@ export class World extends Phaser.Scene {
     const cam = this.cameras.main;
     if (this.mapDef?.interior) {
       // small rooms get their own centred viewport instead of scrolling around
-      const z = Math.max(2, Math.min(5, Math.floor(Math.min(width / (this.mapDef.W * TILE), height / (this.mapDef.H * TILE)))));
+      // whole numbers when they fit; on narrow phones scale down smoothly so the whole room stays visible
+      const raw = Math.min(width / (this.mapDef.W * TILE), height / (this.mapDef.H * TILE));
+      const z = raw >= 2 ? Math.min(5, Math.floor(raw)) : Math.max(1, raw);
       const vw = this.mapDef.W * TILE * z, vh = this.mapDef.H * TILE * z;
       cam.setSize(vw, vh);
       cam.setPosition((width - vw) / 2, (height - vh) / 2);
@@ -603,7 +609,7 @@ export class World extends Phaser.Scene {
   // ── Night, water and sparkle ─────────────────────────────────
   updateNight() {
     if (!this.nightRect) { this.ui.setNight(0); return; }
-    const m = this.mode === "title" ? 19 * 60 : this.state.minutes;
+    const m = this.mode === "title" ? 20.3 * 60 : this.state.minutes;
     const h = m / 60;
     let night = 0;
     if (h >= 18) night = Math.min(1, (h - 18) / 3);

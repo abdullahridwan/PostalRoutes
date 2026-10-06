@@ -102,6 +102,7 @@ export class UI extends Phaser.Scene {
   petals?: Phaser.GameObjects.Particles.ParticleEmitter;
 
   touch!: TouchControls;
+  pauseBtn!: Phaser.GameObjects.Container;
 
   constructor() { super("UI"); }
 
@@ -124,6 +125,17 @@ export class UI extends Phaser.Scene {
     kb.on("keydown-E", () => this.titleSelect());
     // touch: on-screen pad for phones (auto-detected, or force with ?touch)
     this.touch = new TouchControls(this);
+    // phones have no Esc key: a small pause button sits in the top-right corner
+    const pb = this.add.graphics();
+    pb.fillStyle(0x1d2b3a, 0.55).fillCircle(0, 0, 22);
+    pb.lineStyle(3, 0xfff4dc, 0.7).strokeCircle(0, 0, 22);
+    pb.fillStyle(0xfff4dc, 0.95).fillRect(-8, -9, 5, 18).fillRect(3, -9, 5, 18);
+    this.pauseBtn = this.add.container(0, 0, [pb]).setDepth(160).setSize(60, 60).setVisible(false);
+    this.pauseBtn.setInteractive(new Phaser.Geom.Circle(30, 30, 30), Phaser.Geom.Circle.Contains);
+    this.pauseBtn.on("pointerdown", (_p: unknown, _x: unknown, _y: unknown, e: Phaser.Types.Input.EventData) => {
+      e.stopPropagation();
+      if (this.world().mode === "play") this.togglePause();
+    });
     this.touch.onA = () => this.world().onAction();
     this.touch.onB = () => { const w = this.world(); if (w.mode === "play") this.toggleBag(w.state); };
     this.touch.onMap = () => { const w = this.world(); if (w.mode === "play") this.toggleMap(w.mapInfo()); };
@@ -156,9 +168,10 @@ export class UI extends Phaser.Scene {
   }
 
   update() {
-    if (!this.touch.enabled) return;
+    if (!this.touch.enabled) { this.pauseBtn?.setVisible(false); return; }
     const w = this.world();
     this.touch.setVisible(w.mode === "play" && !this.isBusy());
+    this.pauseBtn.setVisible(w.mode === "play" && !this.isBusy());
   }
 
   // ── Layout ──────────────────────────────────────────────────
@@ -174,6 +187,7 @@ export class UI extends Phaser.Scene {
       this.friendsRow.setPosition(14, height - 14).setScale(1);
     }
     this.touch.layout(width, height);
+    this.pauseBtn?.setPosition(width - 38, 38);
     this.drawDialogFrame();
     if (this.title) this.drawTitle();
   }
@@ -213,8 +227,9 @@ export class UI extends Phaser.Scene {
   }
 
   updateHud(s: GameState, helper: HelperCard) {
-    this.hud.setVisible(true);
-    this.friendsRow.setVisible(true);
+    // nothing from the game shows on the title screen
+    this.hud.setVisible(!this.title);
+    this.friendsRow.setVisible(!this.title);
     const w = this.registry.get("weather") ?? "sunny";
     const label = w === "rain" ? "Rainy" : w === "breezy" ? "Breezy" : "Sunny";
     const c = calendar(s.day);
@@ -302,9 +317,11 @@ export class UI extends Phaser.Scene {
 
   toast(text: string) {
     const { width } = this.scale;
-    const t = txt(this, width / 2, 24, text, 20, "#fff4dc", { backgroundColor: "#1d2b3add", padding: { x: 14, y: 8 } })
+    // on narrow phones the HUD fills the top, so toasts drop below it
+    const y0 = width < 560 ? 290 : 24;
+    const t = txt(this, width / 2, y0, text, width < 560 ? 17 : 20, "#fff4dc", { backgroundColor: "#1d2b3add", padding: { x: 14, y: 8 }, wordWrap: { width: width - 40 }, align: "center" })
       .setOrigin(0.5, 0).setDepth(400).setAlpha(0);
-    this.tweens.add({ targets: t, alpha: 1, y: 30, duration: 250, hold: 1800, yoyo: true, onComplete: () => t.destroy() });
+    this.tweens.add({ targets: t, alpha: 1, y: y0 + 6, duration: 250, hold: 1800, yoyo: true, onComplete: () => t.destroy() });
   }
 
   // ── Dialogue ────────────────────────────────────────────────
@@ -699,6 +716,8 @@ export class UI extends Phaser.Scene {
   showTitle(hasSave: boolean, onNew: () => void, onContinue: () => void) {
     this.title?.destroy();
     this.title = this.add.container(0, 0).setDepth(500);
+    this.hud.setVisible(false);
+    this.friendsRow.setVisible(false);
     this.titleActions = hasSave ? [onContinue, onNew] : [onNew];
     this.titleIndex = 0;
     this.registry.set("titleLabels", hasSave ? ["Continue", "New Game"] : ["Start Delivering"]);
@@ -710,7 +729,7 @@ export class UI extends Phaser.Scene {
     c.removeAll(true);
     const { width, height } = this.scale;
     const g = this.add.graphics();
-    g.fillStyle(0x0b1530, 0.35).fillRect(0, 0, width, height);
+    g.fillStyle(0x0b1530, 0.42).fillRect(0, 0, width, height);
     c.add(g);
     const cx = width / 2, cy = height * 0.36;
     const sub = txt(this, cx, cy - 64, "~ a cozy mail-delivery game ~", 20, "#fff4dc").setOrigin(0.5);
